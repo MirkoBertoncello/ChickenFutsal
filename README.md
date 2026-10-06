@@ -43,8 +43,12 @@ con selettore di identità. Gli account reali e le notifiche non sono attivi.
 2. Creare il progetto `chicken-futsal`, scegliendo una regione europea.
 3. Salvare la password del database nel proprio gestore password, senza inviarla in chat.
 4. Nel SQL Editor eseguire `supabase/schema.sql` una sola volta.
-5. Modificare nome ed email in `supabase/setup-admin.sql` ed eseguirlo.
-6. Copiare Project URL e chiave **publishable**, o la vecchia chiave **anon**,
+5. Eseguire `supabase/migrations/20261006_invite_only_signup.sql`, poi in
+   Authentication > Hooks aggiungere **Before User Created**, tipo Postgres,
+   funzione `public.club_before_user_created`. Solo dopo il salvataggio del hook
+   le registrazioni sono limitate alle email associate ai giocatori.
+6. Modificare nome ed email in `supabase/setup-admin.sql` ed eseguirlo.
+7. Copiare Project URL e chiave **publishable**, o la vecchia chiave **anon**,
    nei due campi corrispondenti di `web/config.js`.
    Non inserire mai `service_role`, secret key, password o chiavi VAPID private nel sito.
 
@@ -159,3 +163,17 @@ Per ripetere: `npm install` e `npm test` (Node 20+).
 Non sono stati eseguiti collaudi in un browser reale, su Supabase remoto o di push
 reali. Prima di invitare tutto il gruppo, collaudare con un admin e un giocatore
 su due dispositivi, verificando i permessi, una partita e un turno completo.
+
+## Registrazioni solo su invito — progetto già attivo
+
+Eseguire soltanto `supabase/migrations/20261006_invite_only_signup.sql` nel SQL Editor.
+Poi attivare Authentication > Hooks > Before User Created usando la funzione Postgres
+`public.club_before_user_created`. Il controllo usa le email esatte presenti in
+`club_private.members`, ignorando maiuscole/minuscole. Nessun intero dominio è autorizzato.
+Non assegnare l'esecuzione della funzione agli utenti del sito.
+
+Gli admin invitano dal sito aggiungendo l'email del giocatore in Gestione o quando
+creano il giocatore. Dopo questo passaggio la persona può registrarsi con quell'email.
+Il hook non elimina né blocca l'autenticazione tecnica degli account già esistenti:
+i controlli delle RPC impediscono comunque l'accesso ai dati agli account non invitati.
+Collaudare un nuovo account invitato e uno non invitato per verificare l'attivazione.

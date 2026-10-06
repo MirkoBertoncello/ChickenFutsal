@@ -2,11 +2,12 @@ import { PGlite } from '@electric-sql/pglite';
 import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const db=new PGlite();
-await db.exec(`create role anon; create role authenticated;create role service_role;
+await db.exec(`create role anon; create role authenticated;create role service_role; create role supabase_auth_admin;
 create schema auth;
 create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.test_uid',true),'')::uuid$$;`);
 await db.exec(await readFile(new URL('../supabase/schema.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_invite_only_signup.sql',import.meta.url),'utf8'));
 for(let i=1;i<=12;i++){
  await db.query(`insert into club_private.players(id,name,role) values($1,$2,'Regista')`,[i,'Player '+i]);
  await db.query(`insert into club_private.members(player_id,email,is_admin,see_all) values($1,$2,$3,false)`,[i,`p${i}@test.invalid`,i===1]);
@@ -19,7 +20,16 @@ async function as(i,role='authenticated'){
 const act=async (action,data)=> (await db.query('select public.club_action($1,$2::jsonb) result',[action,JSON.stringify(data)])).rows[0].result;
 const snapshot=async (season=2026)=>(await db.query('select public.club_snapshot($1) result',[season])).rows[0].result;
 async function rejects(fn){await assert.rejects(fn)}
+await as(1,'supabase_auth_admin');
+const hook=async email=>(await db.query('select public.club_before_user_created($1::jsonb) result',[JSON.stringify({user:{email}})])).rows[0].result;
+assert.deepEqual(await hook('p1@test.invalid'),{});
+assert.deepEqual(await hook(' P2@TEST.INVALID '),{});
+assert.equal((await hook('outside@test.invalid')).error.http_code,403);
+assert.equal((await hook('')).error.http_code,403);
+assert.equal((await hook(null)).error.http_code,403);
+await rejects(()=>db.query('select * from club_private.members'));
 await as(2);
+await rejects(()=>hook('p1@test.invalid'));
 let s=await snapshot();assert.equal(s.players.filter(p=>p.ratings).length,1);assert.ok(s.players.find(p=>p.id===2).ratings);assert.equal(s.players.find(p=>p.id===1).goals,undefined);
 await rejects(()=>db.query('select * from club_private.ballots'));await rejects(()=>act('ratings',{id:2,ratings:[90,90,90,90,90,90]}));
 await rejects(()=>db.query('select public.club_claim_push(20)'));
@@ -51,5 +61,5 @@ await act('round_open',{season:2027,award:'pollone'});assert.equal((await snapsh
 await rejects(()=>act('permission',{id:1,key:'admin',value:false}));await rejects(()=>act('invite',{id:1,email:'wrong@test.invalid'}));
 await as(1,'service_role');let jobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(jobs.length,10);await db.query('select public.club_ack_push($1,$2,true)',[jobs[0].id,jobs[0].claim]);
 await db.exec('reset role');await db.query(`select set_config('request.test_uid','00000000-0000-0000-0000-000000000099',false)`);await db.exec('set role authenticated');await rejects(()=>snapshot());
-await db.exec('reset role;set role anon');let health=(await db.query('select public.club_health() x')).rows[0].x;assert.equal(health.ok,true);await rejects(()=>snapshot());
+await db.exec('reset role;set role anon');await rejects(()=>hook('p1@test.invalid'));let health=(await db.query('select public.club_health() x')).rows[0].x;assert.equal(health.ok,true);await rejects(()=>snapshot());
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
