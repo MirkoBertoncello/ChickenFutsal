@@ -7,6 +7,7 @@ create schema auth;
 create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
 create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.test_uid',true),'')::uuid$$;`);
 await db.exec(await readFile(new URL('../supabase/schema.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_cancel_matches_and_guests.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261006_invite_only_signup.sql',import.meta.url),'utf8'));
 for(let i=1;i<=12;i++){
  await db.query(`insert into club_private.players(id,name,role) values($1,$2,'Regista')`,[i,'Player '+i]);
@@ -59,7 +60,29 @@ await rejects(()=>act('round_open',{season:2026,award:'pollone',candidates:[1]})
 await act('round_open',{season:2026,award:'bidone'});assert.equal((await snapshot()).rounds.find(x=>x.award==='bidone').turn,1);
 await act('round_open',{season:2027,award:'pollone'});assert.equal((await snapshot(2027)).rounds[0].turn,1);assert.equal((await snapshot(2027)).players.find(p=>p.id===1).goals,0);
 await rejects(()=>act('permission',{id:1,key:'admin',value:false}));await rejects(()=>act('invite',{id:1,email:'wrong@test.invalid'}));
-await as(1,'service_role');let jobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(jobs.length,10);await db.query('select public.club_ack_push($1,$2,true)',[jobs[0].id,jobs[0].claim]);
+// Guests participate without membership, retain statistics, and can later get an account.
+let guest=await act('player',{name:'Guest Player',role:'Attaccante',occasional:true,email:''});
+assert.equal((await snapshot()).players.find(p=>p.id===guest.id).occasional,true);
+assert.equal((await snapshot()).players.find(p=>p.id===guest.id).email,null);
+await rejects(()=>act('player',{name:'Invalid Guest',role:'Attaccante',occasional:true,email:'guest@test.invalid'}));
+let gm=await act('match',{season:2026,date:'2026-10-15',time:'21:00',field:'Jumbo',a:[1,2,3,4,guest.id],b:[6,7,8,9,10]});
+let gr={};for(const pid of [1,2,3,4,guest.id,6,7,8,9,10])gr[pid]={goals:pid===guest.id?2:0,own:pid===guest.id?1:0,present:true};
+await act('result',{id:gm.id,result:gr});
+s=await snapshot();assert.equal(s.players.find(p=>p.id===guest.id).goals,2);assert.equal(s.players.find(p=>p.id===guest.id).own,1);assert.equal(s.players.find(p=>p.id===guest.id).apps,1);
+await as(2);await rejects(()=>act('match_cancel',{id:m.id,reason:'Unauthorized'}));
+assert.equal((await snapshot()).players.find(p=>p.id===guest.id).goals,2);
+await as(1);await act('match_cancel',{id:m.id,reason:'Errore nel calendario'});
+s=await snapshot();assert.equal(s.matches.find(x=>x.id===m.id).cancelled,true);assert.equal(s.players.find(p=>p.id===1).goals,0);assert.equal(s.players.find(p=>p.id===1).apps,1);
+assert.ok(s.matches.find(x=>x.id===m.id).result);assert.equal(s.players.find(p=>p.id===guest.id).goals,2);
+await rejects(()=>act('match_cancel',{id:m.id}));await rejects(()=>act('result',{id:m.id,result}));
+await rejects(()=>act('match_cancel',{id:gm.id,reason:'x'.repeat(201)}));
+await act('match_cancel',{id:gm.id});s=await snapshot();assert.equal(s.players.find(p=>p.id===guest.id).goals,0);assert.equal(s.players.find(p=>p.id===guest.id).own,0);assert.equal(s.players.find(p=>p.id===guest.id).apps,0);
+let scheduled=await act('match',{season:2026,date:'2026-10-22',time:'21:00',field:'Jumbo',a:[1,2,3,4,guest.id],b:[6,7,8,9,10]});
+await act('match_cancel',{id:scheduled.id,reason:'Pioggia'});s=await snapshot();assert.equal(s.players.find(p=>p.id===1).apps,0);assert.equal(s.notifications.filter(n=>n.text.startsWith('Partita annullata')).length,3);
+await as(1,'supabase_auth_admin');assert.equal((await hook('guest@test.invalid')).error.http_code,403);
+await as(1);await act('invite',{id:guest.id,email:'guest@test.invalid'});assert.equal((await snapshot()).players.find(p=>p.id===guest.id).occasional,false);
+await as(1,'supabase_auth_admin');assert.deepEqual(await hook('guest@test.invalid'),{});
+await as(1,'service_role');let jobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(jobs.length,20);assert.ok(jobs.every(j=>j.body.startsWith('Partita annullata')));await db.query('select public.club_ack_push($1,$2,true)',[jobs[0].id,jobs[0].claim]);
 await db.exec('reset role');await db.query(`select set_config('request.test_uid','00000000-0000-0000-0000-000000000099',false)`);await db.exec('set role authenticated');await rejects(()=>snapshot());
 await db.exec('reset role;set role anon');await rejects(()=>hook('p1@test.invalid'));let health=(await db.query('select public.club_health() x')).rows[0].x;assert.equal(health.ok,true);await rejects(()=>snapshot());
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

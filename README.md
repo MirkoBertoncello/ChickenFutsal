@@ -177,3 +177,23 @@ creano il giocatore. Dopo questo passaggio la persona può registrarsi con quell
 Il hook non elimina né blocca l'autenticazione tecnica degli account già esistenti:
 i controlli delle RPC impediscono comunque l'accesso ai dati agli account non invitati.
 Collaudare un nuovo account invitato e uno non invitato per verificare l'attivazione.
+
+## Aggiornamento: annullamenti e occasionali
+
+Per un progetto già attivo eseguire SOLO
+`supabase/migrations/20261006_cancel_matches_and_guests.sql` nel SQL Editor.
+Lo script aggiunge campi e aggiorna le funzioni; conserva partite, giocatori e voti.
+Non rieseguire `schema.sql`.
+
+- Partite > Dettagli > Annulla partita: solo admin, conferma e motivo facoltativo.
+  La partita resta nello storico, sparisce dalla prossima partita in home e non
+  contribuisce a gol, autogol o presenze, anche se già conclusa. Il tabellino è
+  conservato ma non modificabile. L'annullamento non è reversibile dall'interfaccia.
+- Vengono creati avvisi per i convocati; push solo se già configurato e autorizzato.
+  Le convocazioni ancora in coda sono fermate; push già inviati non possono essere ritirati.
+- Giocatori > Giocatore > Tipo > Occasionale, senza account: nessuna email,
+  nessuna registrazione, ma esagono, statistiche, selezione nelle formazioni e classifiche.
+  Non riceve notifiche né può votare senza account. Può comunque essere candidato
+  ai premi, come gli altri giocatori. Va avvisato personalmente delle partite.
+- Gestione > Abilita account: associare una email trasforma l'occasionale in membro
+  senza perdere i dati. La registrazione sarà ammessa dal controllo sugli inviti.
