@@ -33,6 +33,17 @@ function harness(online=false){
  if(await action('round_open',{season:old,award:'pollone'}))throw Error('archive mutable');
  user=11;page='awards';render();if($('#app').innerHTML.includes('Classifica riservata dal tuo admin'))throw Error('archive award hidden');if(!Object.values(state.closedAwards).flat().every(w=>$('#app').innerHTML.includes(w.name)))throw Error('missing winner');
  })()`,rollover.c);
+ const formations=harness();await vm.runInContext(`(async()=>{
+ user=0;const ids=state.players.slice(0,10).map(p=>p.id),balanced=balanceTeams(ids);
+ if(balanced.a.length!==5||balanced.b.length!==5||new Set([...balanced.a,...balanced.b]).size!==10)throw Error('invalid balance');
+ if(balanced.a.filter(id=>p(id).role==='Portiere').length!==1||balanced.b.filter(id=>p(id).role==='Portiere').length!==1)throw Error('goalkeepers not split');
+ for(const id of ids)p(id).ratings=[60,60,60,60,60,60];const equal=balanceTeams(ids);for(const role of ['Attaccante','Regista','Difensore','Portiere'])if(Math.abs(equal.a.filter(id=>p(id).role===role).length-equal.b.filter(id=>p(id).role===role).length)>1)throw Error('unbalanced roles');
+ draft={ids,mode:'manual',date:'2026-10-08',time:'21:00',field:'Arena'};manualTeamEditor();ids.forEach((id,i)=>$('#manual-team-'+id).value=i<5?'a':'b');applyManualTeams({preventDefault(){}});if(draft.a.join(',')!==ids.slice(0,5).join(','))throw Error('manual assignment');
+ const m=state.matches[0],result=Object.fromEntries([...m.a,...m.b].map(id=>[id,{goals:id===m.a[0]?2:0,own:0,present:id!==m.b[0]}]));await action('result',{id:m.id,result});if(p(m.a[0]).wins!==1||p(m.b[0]).losses!==0)throw Error('result stats');
+ p(1).goals=99;for(const pending of state.matches.filter(m=>!m.done&&!m.cancelled))await action('match_cancel',{id:pending.id});const old=season;await action('season_start',{previous:old,name:'Next',started_on:'2027-09-01'});const frozen=JSON.stringify(state.hallOfFame);
+ const champion=state.hallOfFame[0].awards.goals[0];await action('player_delete',{id:champion.id});if(JSON.stringify(state.hallOfFame)!==frozen)throw Error('award changed after delete');
+ user=11;page='hall';render();if(!$('#app').innerHTML.includes(champion.name)||!$('#app').innerHTML.includes('4 Pollari'))throw Error('hall hidden');
+ })()`,formations.c);
  const online=harness(true);assert.ok(online.n('#app').innerHTML.includes('Accedi'));assert.ok(!online.n('#app').innerHTML.includes('32'));
  await vm.runInContext(`(async()=>{session={access_token:'test-session'};await rpc('club_action',{p_action:'vote',p_data:{round:1,candidate:1}})})()`,online.c);
  assert.equal(online.calls[0].args.headers.Authorization,'Bearer test-session');assert.ok(online.calls[0].url.endsWith('/rest/v1/rpc/club_action'));
