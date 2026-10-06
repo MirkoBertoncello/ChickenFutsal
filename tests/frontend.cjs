@@ -31,6 +31,7 @@ function harness(online=false){
  if(season===old||p(0).goals!==0||state.matches.length)throw Error('new season reset');
  await changeSeason(old);if(!state.seasonInfo.closed_at||p(0).goals!==goals)throw Error('archive lost');
  if(await action('round_open',{season:old,award:'pollone'}))throw Error('archive mutable');
+ user=11;page='awards';render();if($('#app').innerHTML.includes('Classifica riservata dal tuo admin'))throw Error('archive award hidden');if(!Object.values(state.closedAwards).flat().every(w=>$('#app').innerHTML.includes(w.name)))throw Error('missing winner');
  })()`,rollover.c);
  const online=harness(true);assert.ok(online.n('#app').innerHTML.includes('Accedi'));assert.ok(!online.n('#app').innerHTML.includes('32'));
  await vm.runInContext(`(async()=>{session={access_token:'test-session'};await rpc('club_action',{p_action:'vote',p_data:{round:1,candidate:1}})})()`,online.c);

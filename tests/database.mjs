@@ -136,6 +136,14 @@ const crossYear=await act('match',{season:next.id,date:'2026-12-10',time:'21:00'
 assert.ok(crossYear.id);
 const january=await act('match',{season:next.id,date:'2027-01-14',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});assert.ok(january.id);
 assert.ok((await snapshot()).seasonInfo.closed_at);
+// Members without statistics access see archived winners only.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261006_closed_award_winners.sql',import.meta.url),'utf8'));
+await as(1);const archivedAdmin=await snapshot();const expectedWinners={};for(const key of ['goals','own','apps']){const max=Math.max(0,...archivedAdmin.players.map(p=>p[key]));if(max)expectedWinners[key]=archivedAdmin.players.filter(p=>p[key]===max).map(p=>({id:p.id,name:p.name}))}
+await as(3);const archivedMember=await snapshot();assert.deepEqual(archivedMember.closedAwards,expectedWinners);assert.equal(archivedMember.players.find(p=>p.id===1).goals,undefined);assert.equal(archivedMember.players.find(p=>p.id===1).ratings,undefined);
+assert.ok(Object.values(archivedMember.closedAwards).flat().every(w=>Object.keys(w).sort().join(',')==='id,name'));
+assert.deepEqual((await db.query('select public.club_snapshot(null) x')).rows[0].x.closedAwards,{});
+await db.exec('reset role;set role anon');await rejects(()=>snapshot());
+
 // Push configuration is readable only by members; scheduler setup is transactional and repeatable.
 await db.exec('reset role');
 await db.exec(await readFile(new URL('../supabase/migrations/20261006_push_config.sql',import.meta.url),'utf8'));

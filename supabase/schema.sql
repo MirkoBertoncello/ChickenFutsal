@@ -101,7 +101,7 @@ revoke all on function club_private.actor() from public;
 
 create function public.club_snapshot(p_season integer default null) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare v_actor bigint; v_admin boolean; v_all boolean; v_players jsonb; v_matches jsonb; v_rounds jsonb;
+declare v_actor bigint; v_admin boolean; v_all boolean; v_players jsonb; v_matches jsonb; v_rounds jsonb; v_awards jsonb;
 begin
  v_actor:=club_private.actor();
  if p_season is null then select id into p_season from club_private.seasons where closed_at is null; end if;
@@ -132,7 +132,25 @@ begin
  'results',case when r.status<>'open' then coalesce((select jsonb_agg(jsonb_build_object('id',a.candidate_id,'count',a.n) order by a.n desc,a.candidate_id)
  from (select b.candidate_id,count(*) n from club_private.ballots b where b.round_id=r.id group by b.candidate_id) a),'[]'::jsonb) else '[]'::jsonb end)
  order by r.award,r.turn),'[]'::jsonb) into v_rounds from club_private.rounds r where r.season=p_season;
+ -- Expose only winner identities for closed seasons, never other players' totals.
+ v_awards:='{}'::jsonb;
+ if exists(select 1 from club_private.seasons where id=p_season and closed_at is not null) then
+  with totals as (
+   select p.id,p.name,coalesce(sum((r.value->>'goals')::int),0) goals,
+    coalesce(sum((r.value->>'own')::int),0) own,
+    count(*) filter(where (r.value->>'present')::boolean) apps
+   from club_private.players p left join club_private.matches m on m.season=p_season and m.cancelled_at is null and m.result ? p.id::text
+   left join lateral jsonb_each(m.result) r on r.key=p.id::text group by p.id,p.name
+  ), scores as (
+   select t.id,t.name,v.metric,v.total from totals t cross join lateral (values ('goals',t.goals),('own',t.own),('apps',t.apps)) v(metric,total)
+  ), ranked as (
+   select *,max(total) over(partition by metric) maximum from scores
+  ), winners as (
+   select metric,jsonb_agg(jsonb_build_object('id',id,'name',name) order by id) identities from ranked where total=maximum and maximum>0 group by metric
+  ) select coalesce(jsonb_object_agg(metric,identities),'{}'::jsonb) into v_awards from winners;
+ end if;
  return jsonb_build_object('user',v_actor,'season',p_season,'players',v_players,'matches',v_matches,'rounds',v_rounds,
+ 'closedAwards',v_awards,
  'activeSeason',(select id from club_private.seasons where closed_at is null),
  'seasonInfo',(select to_jsonb(s) from club_private.seasons s where id=p_season),
  'seasons',(select jsonb_agg(id order by id desc) from club_private.seasons),

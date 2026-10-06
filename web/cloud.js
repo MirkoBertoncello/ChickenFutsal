@@ -190,6 +190,8 @@ function updateDemoSeason(){
  for(const m of state.matches)if(!state.demoAllMatches.some(x=>x.id===m.id))state.demoAllMatches.push(m);
  state.matches=state.demoAllMatches.filter(m=>m.season===season);
  for(const p of state.players){if(state.demoDisplayedSeason===season)continue;const base=state.demoSeasonTotals?.[season]?.[p.id]||(season===2026?state.demoBaseline[p.id]:null);p.goals=base?.goals||0;p.own=base?.own||0;p.apps=base?.apps||0;}
+ state.closedAwards={};
+ if(state.seasonInfo?.closed_at)for(const key of ['goals','own','apps']){const max=Math.max(0,...state.players.map(p=>p[key]));state.closedAwards[key]=max?state.players.filter(p=>p[key]===max).map(p=>({id:p.id,name:p.name})):[]}
  state.demoDisplayedSeason=season;save();
 }
 if(!online){updateDemoSeason();render()}
