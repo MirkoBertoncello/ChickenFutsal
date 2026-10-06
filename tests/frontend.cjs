@@ -49,6 +49,12 @@ function harness(online=false){
  for(const [key,value] of Object.entries(reminderDefaults)){if(typeof value==='boolean')$('#reminder-'+key).checked=value;else $('#reminder-'+key).value=String(value)}$('#reminder-first_hours').value='10';await saveReminderSettings({preventDefault(){}});if(state.reminderSettings.first_hours!==10)throw Error('unsaved reminders');
  user=11;render();if($('#app').innerHTML.includes('reminder-first_hours'))throw Error('nonadmin settings');if(await action('reminder_settings',{...reminderDefaults}))throw Error('nonadmin saved reminders');
  })()`,reminders.c);
+ const playerEditing=harness();await vm.runInContext(`(async()=>{
+ user=0;profile(1);if(!$('#modal').innerHTML.includes('Modifica giocatore'))throw Error('missing edit button');editPlayer(1);if(!$('#modal').innerHTML.includes('edit-player-name')||!$('#modal').innerHTML.includes('edit-player-role')||!$('#modal').innerHTML.includes('edit-player-kind'))throw Error('missing fields');
+ const old=JSON.stringify({goals:p(1).goals,ratings:p(1).ratings});$('#edit-player-name').value='Nome Nuovo';$('#edit-player-role').value='Portiere';$('#edit-player-kind').value='member';await savePlayerDetails({preventDefault(){}},1);if(p(1).name!=='Nome Nuovo'||p(1).role!=='Portiere'||JSON.stringify({goals:p(1).goals,ratings:p(1).ratings})!==old)throw Error('profile edit lost statistics');
+ p(1).email='member@test.invalid';editPlayer(1);$('#edit-player-kind').value='guest';playerKindChanged(1);if($('#edit-player-revoke').hidden||!$('#edit-player-revoke-confirm').required)throw Error('missing revoke confirmation');$('#edit-player-name').value='Nome Nuovo';$('#edit-player-role').value='Portiere';$('#edit-player-revoke-confirm').checked=true;await savePlayerDetails({preventDefault(){}},1);if(!p(1).occasional||p(1).email)throw Error('guest conversion');
+ user=11;profile(1);if($('#modal').innerHTML.includes('Modifica giocatore'))throw Error('nonadmin edit control');if(await action('player_edit',{id:1,name:'Wrong',role:'Difensore',occasional:false}))throw Error('nonadmin edit action');
+ })()`,playerEditing.c);
  const online=harness(true);assert.ok(online.n('#app').innerHTML.includes('Accedi'));assert.ok(!online.n('#app').innerHTML.includes('32'));
  await vm.runInContext(`(async()=>{session={access_token:'test-session'};await rpc('club_action',{p_action:'vote',p_data:{round:1,candidate:1}})})()`,online.c);
  assert.equal(online.calls[0].args.headers.Authorization,'Bearer test-session');assert.ok(online.calls[0].url.endsWith('/rest/v1/rpc/club_action'));

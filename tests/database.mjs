@@ -253,4 +253,24 @@ const real=(await db.query(`insert into club_private.matches(season,match_date,m
 select $1,((now()+interval '7 hours 58 minutes') at time zone 'Europe/Rome')::date,((now()+interval '7 hours 58 minutes') at time zone 'Europe/Rome')::time,'Live reminder test',$2,$3,now()-interval '1 day' returning id`,[reminderSeason,JSON.stringify(reminderA),JSON.stringify(reminderB)])).rows[0].id;
 await as(1,'service_role');const automaticJobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(automaticJobs.length,9);assert.ok(automaticJobs.every(j=>j.body.includes('Live reminder test')));
 await as(1);await act('match_cancel',{id:real});await as(1,'service_role');const afterCancel=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.ok(afterCancel.every(j=>!j.body.startsWith('Promemoria partita')));
+// Player editing preserves identity/history and safely converts account membership.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261006_edit_player.sql',import.meta.url),'utf8'));await as(1);
+const editProfile={id:4,name:'Mario Aggiornato',role:'Portiere',occasional:false};
+await as(4);await rejects(()=>act('player_edit',editProfile));await as(1);
+await rejects(()=>act('player_edit',{...editProfile,name:'  '}));await rejects(()=>act('player_edit',{...editProfile,role:'Invalid'}));await rejects(()=>act('player_edit',{...editProfile,occasional:'yes'}));
+await rejects(()=>act('player_edit',{id:1,name:'Admin',role:'Regista',occasional:true}));await rejects(()=>act('player_edit',{id:3,name:'Admin 3',role:'Regista',occasional:true}));
+await act('permission',{id:4,key:'seeAll',value:true});
+const profileBefore=(await db.query('select public.club_snapshot(null) x')).rows[0].x;
+await act('player_edit',editProfile);let profileAfter=(await db.query('select public.club_snapshot(null) x')).rows[0].x;
+const editedProfile=profileAfter.players.find(p=>p.id===4),oldProfile=profileBefore.players.find(p=>p.id===4);
+assert.equal(editedProfile.name,'Mario Aggiornato');assert.equal(editedProfile.role,'Portiere');assert.equal(editedProfile.email,oldProfile.email);assert.equal(editedProfile.seeAll,true);
+for(const key of ['goals','own','apps','wins','draws','losses','ratings'])assert.deepEqual(editedProfile[key],oldProfile[key]);assert.deepEqual(profileAfter.matches,profileBefore.matches);assert.deepEqual(profileAfter.hallOfFame,profileBefore.hallOfFame);
+await act('round_open',{season:reminderSeason,award:'pollone'});const profileRound=(await db.query('select public.club_snapshot(null) x')).rows[0].x.rounds.find(r=>r.award==='pollone');
+await as(4);await act('vote',{round:profileRound.id,candidate:4});await act('push_subscribe',{subscription:{endpoint:'https://fcm.googleapis.com/send/edit-player',keys:{auth:'test',p256dh:'test'}}});await as(1);
+await act('player_edit',{...editProfile,occasional:true});profileAfter=(await db.query('select public.club_snapshot(null) x')).rows[0].x;assert.equal(profileAfter.players.find(p=>p.id===4).occasional,true);assert.equal(profileAfter.players.find(p=>p.id===4).email,null);assert.equal(profileAfter.rounds.find(r=>r.id===profileRound.id).count,1);
+await as(4);await rejects(()=>db.query('select public.club_snapshot(null)'));await as(1,'supabase_auth_admin');assert.equal((await hook('p4@test.invalid')).error.http_code,403);
+await db.exec('reset role');assert.equal((await db.query('select count(*) n from club_private.push_subscriptions where player_id=4')).rows[0].n,0);assert.equal((await db.query("select count(*) n from club_private.push_queue where player_id=4 and status<>'sent'")).rows[0].n,0);
+assert.equal((await db.query('select count(*) n from auth.users where email=$1',['p4@test.invalid'])).rows[0].n,1);
+await as(1);await act('player_edit',{...editProfile,name:'Mario Membro',occasional:false});assert.equal((await db.query('select public.club_snapshot(null) x')).rows[0].x.players.find(p=>p.id===4).email,null);await act('invite',{id:4,email:'p4@test.invalid'});await as(4);
+const restored=(await db.query('select public.club_snapshot(null) x')).rows[0].x;assert.equal(restored.user,4);assert.equal(restored.players.find(p=>p.id===4).name,'Mario Membro');assert.equal(restored.players.find(p=>p.id===4).seeAll,false);assert.equal(restored.rounds.find(r=>r.id===profileRound.id).voted,true);
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

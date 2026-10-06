@@ -358,6 +358,21 @@ begin
    update club_private.seasons set closed_at=now() where closed_at is null;
    insert into club_private.seasons(id,name,started_on) values(v_season,trim(p_data->>'name'),(p_data->>'started_on')::date);
    v_id:=v_season;
+  when 'player_edit' then
+   v_pid:=(p_data->>'id')::bigint;
+   if not exists(select 1 from club_private.players where id=v_pid) then raise exception 'Giocatore inesistente'; end if;
+   if nullif(trim(p_data->>'name'),'') is null or length(trim(p_data->>'name'))>60 then raise exception 'Nome obbligatorio (massimo 60 caratteri)'; end if;
+   if (p_data->>'role') is null or (p_data->>'role') not in ('Attaccante','Regista','Difensore','Portiere') then raise exception 'Ruolo non valido'; end if;
+   if jsonb_typeof(p_data->'occasional') is distinct from 'boolean' then raise exception 'Tipo di giocatore non valido'; end if;
+   if (p_data->>'occasional')::boolean then
+    if exists(select 1 from club_private.members where player_id=v_pid and is_admin) then raise exception 'Un admin non può diventare occasionale: rimuovi prima il suo ruolo admin'; end if;
+    -- Revoke group access while preserving the player, results and past secret ballots.
+    update club_private.push_queue set status='sent',claim_token=null where player_id=v_pid and status<>'sent';
+    delete from club_private.push_subscriptions where player_id=v_pid;
+    delete from club_private.members where player_id=v_pid;
+   end if;
+   update club_private.players set name=trim(p_data->>'name'),role=p_data->>'role',occasional=(p_data->>'occasional')::boolean where id=v_pid;
+   v_id:=v_pid;
   when 'player_delete' then
    v_pid:=(p_data->>'id')::bigint;
    if v_pid=v_actor then raise exception 'Non puoi eliminare il tuo profilo admin'; end if;
