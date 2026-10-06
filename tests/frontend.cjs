@@ -44,6 +44,11 @@ function harness(online=false){
  const champion=state.hallOfFame[0].awards.goals[0];await action('player_delete',{id:champion.id});if(JSON.stringify(state.hallOfFame)!==frozen)throw Error('award changed after delete');
  user=11;page='hall';render();if(!$('#app').innerHTML.includes(champion.name)||!$('#app').innerHTML.includes('4 Pollari'))throw Error('hall hidden');
  })()`,formations.c);
+ const reminders=harness();await vm.runInContext(`(async()=>{
+ user=0;page='settings';render();if(!$('#app').innerHTML.includes('Promemoria automatici')||!$('#app').innerHTML.includes('reminder-first_hours'))throw Error('missing reminder settings');
+ for(const [key,value] of Object.entries(reminderDefaults)){if(typeof value==='boolean')$('#reminder-'+key).checked=value;else $('#reminder-'+key).value=String(value)}$('#reminder-first_hours').value='10';await saveReminderSettings({preventDefault(){}});if(state.reminderSettings.first_hours!==10)throw Error('unsaved reminders');
+ user=11;render();if($('#app').innerHTML.includes('reminder-first_hours'))throw Error('nonadmin settings');if(await action('reminder_settings',{...reminderDefaults}))throw Error('nonadmin saved reminders');
+ })()`,reminders.c);
  const online=harness(true);assert.ok(online.n('#app').innerHTML.includes('Accedi'));assert.ok(!online.n('#app').innerHTML.includes('32'));
  await vm.runInContext(`(async()=>{session={access_token:'test-session'};await rpc('club_action',{p_action:'vote',p_data:{round:1,candidate:1}})})()`,online.c);
  assert.equal(online.calls[0].args.headers.Authorization,'Bearer test-session');assert.ok(online.calls[0].url.endsWith('/rest/v1/rpc/club_action'));

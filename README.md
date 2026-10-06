@@ -244,3 +244,17 @@ Verifiche: bilanciamento portieri e ruoli, assegnazione manuale, risultati corre
 Eseguire `supabase/migrations/20261006_security_advisor_hardening.sql` per rendere `club_health` SECURITY INVOKER e revocare le chiamate browser alla funzione tecnica `public.rls_auto_enable()`, se presente. Il trigger automatico RLS resta attivo. Il controllo di stato restituisce solo `ok`, senza leggere informazioni sul gruppo.
 
 Gli avvisi sulle funzioni `club_action`, `club_snapshot` e `club_push_config` SECURITY DEFINER sono intenzionali: sono l’interfaccia del gruppo privato e controllano appartenenza, autorizzazioni, statistiche riservate e voti. Non revocare il loro EXECUTE agli utenti autenticati e non convertirle in SECURITY INVOKER senza ridisegnare l’accesso ai dati. Le tabelle `club_private` hanno RLS senza policy per negare l’accesso diretto; non aggiungere policy permissive per eliminare un avviso informativo. La protezione delle password compromesse riguarda i login con password gestita da Supabase; l’accesso Google del progetto delega la password a Google. La configurazione di Auth si gestisce dalla dashboard e non tramite questa migrazione.
+
+### Promemoria automatici configurabili
+Eseguire `supabase/migrations/20261006_automatic_reminders.sql` dopo le migrazioni precedenti. Il sender push già esistente genera gli avvisi prima di prelevare la coda: **non serve ripubblicare la Edge Function**. Serve però aver completato la configurazione `send-push` e del job Cron ogni cinque minuti. Se il progetto Supabase è in pausa, il job non viene eseguito.
+
+In Gestione gli admin possono configurare:
+- attivazione dei promemoria ai convocati e dei due avvisi separatamente; anticipo predefinito **8 ore** e **1 ora**, modificabile da 15 minuti a 7 giorni;
+- attivazione del promemoria per risultato mancante; durata prevista della partita (60 minuti) e attesa dopo la fine (1 ora): predefinito un avviso agli admin **2 ore dopo l’inizio**;
+- ripetizioni del promemoria agli admin, disattivate inizialmente; intervallo (24 ore) e limite massimo (3 avvisi complessivi quando le ripetizioni sono abilitate).
+
+Gli orari sono convertiti con `Europe/Rome`, quindi comprendono automaticamente l’ora legale. Gli avvisi per i partecipanti arrivano solo ai convocati con account; quelli per il risultato a tutti gli admin attuali. I promemoria interrompono gli invii quando la partita è annullata, il risultato è registrato o la stagione è chiusa. Date/ore modificate e parametri disattivati invalidano gli invii ancora in coda. Il registro evita duplicati per partita, destinatario e scadenza. La durata configurata serve al promemoria e non modifica la durata del file calendario .ics.
+
+Se crei o sposti una partita dopo la scadenza di un promemoria, quello scaduto viene saltato: la convocazione/variazione invia già il suo avviso. Dopo un’interruzione si recupera solo l’ultimo promemoria dovuto, senza inviare tutti quelli arretrati contemporaneamente; i promemoria ai giocatori non vengono inviati dopo l’inizio della partita. Gli avvisi nel sito restano nello storico. La consegna push richiede il consenso sul dispositivo e può ritardare di circa cinque minuti più gli eventuali retry. Invii già presi in carico dal servizio esterno non possono essere richiamati.
+
+Test: orari invernali/estivi, limiti temporali esatti, invii senza duplicati, giocatori occasionali esclusi, destinatari admin, modifiche data/campo, risultato registrato, annullamenti, impostazioni disattivate, ripetizioni limitate e generazione automatica dal sender esistente.

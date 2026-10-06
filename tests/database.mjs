@@ -213,4 +213,44 @@ await db.exec('set role anon');assert.deepEqual((await db.query('select public.c
 await as(3);assert.ok((await snapshot()).user===3);await rejects(()=>act('player',{name:'Unauthorized',role:'Regista'}));
 await db.exec('reset role');await db.exec('drop event trigger test_auto_rls;drop table public.test_automatic_rls;drop function public.rls_auto_enable()');
 await db.exec(await readFile(new URL('../supabase/migrations/20261006_security_advisor_hardening.sql',import.meta.url),'utf8'));
+// Automatic reminders: timezone, deadlines, exact-once queueing and admin settings.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261006_automatic_reminders.sql',import.meta.url),'utf8'));
+await as(1);let reminderConfig=(await db.query('select public.club_snapshot(null) x')).rows[0].x.reminderSettings;assert.equal(reminderConfig.first_hours,8);assert.equal(reminderConfig.second_hours,1);
+await as(4);assert.equal((await db.query('select public.club_snapshot(null) x')).rows[0].x.reminderSettings,null);await rejects(()=>act('reminder_settings',reminderConfig));await rejects(()=>db.query('select club_private.enqueue_reminders()'));await as(1);
+await rejects(()=>act('reminder_settings',{...reminderConfig,first_hours:1,second_hours:8}));await rejects(()=>act('reminder_settings',{...reminderConfig,result_max_reminders:0}));
+await act('reminder_settings',{...reminderConfig,first_hours:10,second_hours:2});assert.equal((await db.query('select public.club_snapshot(null) x')).rows[0].x.reminderSettings.first_hours,10);await act('reminder_settings',reminderConfig);
+const occasionalReminder=await act('player',{name:'Reminder guest',role:'Portiere',occasional:true,email:''});await act('permission',{id:3,key:'admin',value:true});
+await db.exec('reset role');const reminderSeason=(await db.query('select id from club_private.seasons where closed_at is null')).rows[0].id;
+const reminderA=[1,3,4,5,6],reminderB=[7,8,9,10,occasionalReminder.id];
+const fixture=async(date,time='21:00',updated='2027-01-01T00:00:00Z')=>(await db.query(`insert into club_private.matches(season,match_date,match_time,field,team_a,team_b,updated_at) values($1,$2,$3,'Reminder Arena',$4,$5,$6) returning id`,[reminderSeason,date,time,JSON.stringify(reminderA),JSON.stringify(reminderB),updated])).rows[0].id;
+const pump=async(time)=>(await db.query('select club_private.enqueue_reminders($1::timestamptz) n',[time])).rows[0].n;
+const notes=async(match)=>(await db.query('select player_id,reminder_key,text from club_private.notifications where match_id=$1 and reminder_key is not null order by id',[match])).rows;
+const winter=await fixture('2028-01-10');assert.equal(await pump('2028-01-10T11:59:59Z'),0);assert.equal(await pump('2028-01-10T12:00:00Z'),9);assert.equal(await pump('2028-01-10T12:05:00Z'),0);
+assert.equal((await notes(winter)).length,9);assert.ok(!(await notes(winter)).some(n=>n.player_id===occasionalReminder.id));
+assert.equal(await pump('2028-01-10T19:00:00Z'),9);assert.equal((await notes(winter)).length,18);
+assert.equal(await pump('2028-01-10T21:59:59Z'),0);assert.equal(await pump('2028-01-10T22:00:00Z'),2);assert.deepEqual((await notes(winter)).filter(n=>n.reminder_key.startsWith('result:')).map(n=>n.player_id).sort(),[1,3]);assert.equal(await pump('2028-01-11T22:00:00Z'),0);
+await db.query('update club_private.matches set cancelled_at=now() where id=$1',[winter]);
+const summer=await fixture('2028-07-10');assert.equal(await pump('2028-07-10T10:59:59Z'),0);assert.equal(await pump('2028-07-10T11:00:00Z'),9);await db.query('update club_private.matches set cancelled_at=now() where id=$1',[summer]);
+const late=await fixture('2028-08-10','21:00','2028-08-10T12:00:00Z');assert.equal(await pump('2028-08-10T12:05:00Z'),0);assert.equal(await pump('2028-08-10T18:00:00Z'),9);await db.query('update club_private.matches set cancelled_at=now() where id=$1',[late]);
+const outage=await fixture('2028-09-10');assert.equal(await pump('2028-09-10T18:30:00Z'),9);assert.equal((await notes(outage)).length,9);await db.query('update club_private.matches set cancelled_at=now() where id=$1',[outage]);
+await as(1);await act('reminder_settings',{...reminderConfig,result_repeat_enabled:true,result_repeat_hours:24,result_max_reminders:3});await db.exec('reset role');
+const repeated=await fixture('2028-10-10');assert.equal(await pump('2028-10-10T21:00:00Z'),2);assert.equal(await pump('2028-10-11T21:00:00Z'),2);assert.equal(await pump('2028-10-12T21:00:00Z'),2);assert.equal(await pump('2028-10-13T21:00:00Z'),0);assert.equal((await notes(repeated)).length,6);
+await as(1);const reminderResult=Object.fromEntries([...reminderA,...reminderB].map(id=>[id,{goals:0,own:0,present:true}]));await act('result',{id:repeated,result:reminderResult});await db.exec('reset role');assert.equal(await pump('2028-10-14T21:00:00Z'),0);
+assert.equal((await db.query(`select count(*) n from club_private.push_queue q join club_private.notifications n on n.id=q.notification_id where n.match_id=$1 and q.status<>'sent'`,[repeated])).rows[0].n,0);
+await as(1);await act('reminder_settings',{...reminderConfig,participant_enabled:false,result_enabled:false});await db.exec('reset role');const disabled=await fixture('2028-11-10');assert.equal(await pump('2028-11-10T12:00:00Z'),0);assert.equal(await pump('2028-11-10T22:00:00Z'),0);await db.query('update club_private.matches set cancelled_at=now() where id=$1',[disabled]);
+await as(1);await act('reminder_settings',reminderConfig);await db.exec('reset role');
+// Rescheduling suppresses the old queue and uses the new date for future reminders.
+const moved=await fixture('2028-12-10');assert.equal(await pump('2028-12-10T12:00:00Z'),9);
+await as(1);await act('match_edit',{id:moved,date:'2028-12-17',time:'21:00',field:'Moved Arena',a:reminderA,b:reminderB});await db.exec('reset role');
+assert.equal((await db.query(`select count(*) n from club_private.push_queue q join club_private.notifications n on n.id=q.notification_id where n.match_id=$1 and n.reminder_key is not null and q.status<>'sent'`,[moved])).rows[0].n,0);
+assert.equal(await pump('2028-12-17T12:00:00Z'),9);assert.ok((await notes(moved)).some(n=>n.text.includes('2028-12-17')&&n.text.includes('Moved Arena')));
+await as(1);await act('reminder_settings',{...reminderConfig,first_enabled:false});await db.exec('reset role');await pump('2028-12-17T12:05:00Z');
+assert.equal((await db.query(`select count(*) n from club_private.push_queue q join club_private.notifications n on n.id=q.notification_id where n.match_id=$1 and n.reminder_key is not null and q.status<>'sent'`,[moved])).rows[0].n,0);
+await as(1);await act('match_cancel',{id:moved});await act('reminder_settings',reminderConfig);await db.exec('reset role');
+// Existing sender RPC automatically generates reminders without changing the Edge Function.
+await db.exec("update club_private.push_queue set status='sent'");
+const real=(await db.query(`insert into club_private.matches(season,match_date,match_time,field,team_a,team_b,updated_at)
+select $1,((now()+interval '7 hours 58 minutes') at time zone 'Europe/Rome')::date,((now()+interval '7 hours 58 minutes') at time zone 'Europe/Rome')::time,'Live reminder test',$2,$3,now()-interval '1 day' returning id`,[reminderSeason,JSON.stringify(reminderA),JSON.stringify(reminderB)])).rows[0].id;
+await as(1,'service_role');const automaticJobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(automaticJobs.length,9);assert.ok(automaticJobs.every(j=>j.body.includes('Live reminder test')));
+await as(1);await act('match_cancel',{id:real});await as(1,'service_role');const afterCancel=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.ok(afterCancel.every(j=>!j.body.startsWith('Promemoria partita')));
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
