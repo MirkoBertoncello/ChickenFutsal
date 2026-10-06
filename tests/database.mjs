@@ -8,6 +8,7 @@ create table auth.users(id uuid primary key,email text,email_confirmed_at timest
 create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.test_uid',true),'')::uuid$$;`);
 await db.exec(await readFile(new URL('../supabase/schema.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261006_cancel_matches_and_guests.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_delete_player.sql',import.meta.url),'utf8'));
 await db.exec(await readFile(new URL('../supabase/migrations/20261006_invite_only_signup.sql',import.meta.url),'utf8'));
 for(let i=1;i<=12;i++){
  await db.query(`insert into club_private.players(id,name,role) values($1,$2,'Regista')`,[i,'Player '+i]);
@@ -83,6 +84,19 @@ await as(1,'supabase_auth_admin');assert.equal((await hook('guest@test.invalid')
 await as(1);await act('invite',{id:guest.id,email:'guest@test.invalid'});assert.equal((await snapshot()).players.find(p=>p.id===guest.id).occasional,false);
 await as(1,'supabase_auth_admin');assert.deepEqual(await hook('guest@test.invalid'),{});
 await as(1,'service_role');let jobs=(await db.query('select public.club_claim_push(20) x')).rows[0].x;assert.equal(jobs.length,20);assert.ok(jobs.every(j=>j.body.startsWith('Partita annullata')));await db.query('select public.club_ack_push($1,$2,true)',[jobs[0].id,jobs[0].claim]);
+await as(2);await rejects(()=>act('player_delete',{id:guest.id}));
+await as(1);await rejects(()=>act('player_delete',{id:1}));
+let pending=await act('match',{season:2026,date:'2026-10-29',time:'21:00',field:'Jumbo',a:[1,2,3,4,guest.id],b:[6,7,8,9,10]});
+await rejects(()=>act('player_delete',{id:guest.id}));await act('match_cancel',{id:pending.id});
+let previous=await snapshot();await act('player_delete',{id:guest.id});s=await snapshot();assert.ok(!s.players.find(p=>p.id===guest.id));assert.equal(s.matches.length,previous.matches.length);assert.deepEqual(s.matches.map(m=>m.score),previous.matches.map(m=>m.score));
+await as(1,'supabase_auth_admin');assert.equal((await hook('guest@test.invalid')).error.http_code,403);
+await as(1);await rejects(()=>act('player_delete',{id:guest.id}));
+let historic=await act('match',{season:2026,date:'2026-11-05',time:'21:00',field:'Jumbo',a:[1,2,3,4,5],b:[6,7,8,9,10]});
+let historicResult={};for(let i=1;i<=10;i++)historicResult[i]={goals:i===2?3:0,own:0,present:true};await act('result',{id:historic.id,result:historicResult});
+let beforeDelete=await snapshot();await act('player_delete',{id:2});s=await snapshot();assert.ok(!s.players.find(p=>p.id===2));assert.deepEqual(s.matches.find(m=>m.id===historic.id).score,[3,0]);assert.equal(s.players.find(p=>p.id===1).apps,beforeDelete.players.find(p=>p.id===1).apps);
+assert.ok(s.rounds.every(r=>!r.candidates.includes(2)));assert.equal(s.rounds.find(r=>r.award==='pollone'&&r.turn===1).count,1);
+await as(2);await rejects(()=>snapshot());await as(1,'supabase_auth_admin');assert.equal((await hook('p2@test.invalid')).error.http_code,403);
+
 await db.exec('reset role');await db.query(`select set_config('request.test_uid','00000000-0000-0000-0000-000000000099',false)`);await db.exec('set role authenticated');await rejects(()=>snapshot());
 await db.exec('reset role;set role anon');await rejects(()=>hook('p1@test.invalid'));let health=(await db.query('select public.club_health() x')).rows[0].x;assert.equal(health.ok,true);await rejects(()=>snapshot());
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

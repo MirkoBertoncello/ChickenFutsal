@@ -197,3 +197,21 @@ Non rieseguire `schema.sql`.
   ai premi, come gli altri giocatori. Va avvisato personalmente delle partite.
 - Gestione > Abilita account: associare una email trasforma l'occasionale in membro
   senza perdere i dati. La registrazione sarà ammessa dal controllo sugli inviti.
+
+## Eliminazione giocatori
+
+Per il database esistente eseguire solo `supabase/migrations/20261006_delete_player.sql`,
+DOPO la migrazione annullamenti e occasionali. Gli admin possono aprire un profilo
+in Giocatori e scegliere Elimina giocatore, confermando con ELIMINA.
+Non è possibile eliminare il proprio profilo admin né un giocatore convocato in
+partite ancora in programma: prima occorre annullarle.
+
+Il profilo viene cancellato fisicamente: nome, email associata, esagono, membership,
+avvisi, recapiti push e schede espresse/ricevute sono rimossi. Le candidature e i
+risultati delle votazioni vengono aggiornati. Le partite conservano il contributo
+anonimo al tabellino (identificativo storico senza nome, visualizzato come Giocatore
+eliminato), preservando punteggio e statistiche degli altri. Questo non è cancellazione
+integrale di tutte le tracce storiche. L'eventuale account tecnico Supabase Auth
+resta esistente ma non può più accedere ai dati; può essere cancellato separatamente
+in Authentication > Users. I controlli degli inviti impediranno una nuova registrazione
+finché l'email non viene nuovamente associata a un giocatore.
