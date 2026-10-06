@@ -40,7 +40,7 @@ create table if not exists club_private.seasons (
 );
 create unique index if not exists one_active_season on club_private.seasons ((true)) where closed_at is null;
 insert into club_private.seasons(id,name,started_on,closed_at)
-select y,y::text,make_date(y,1,1),case when y=max(y) over() then null else now() end
+select y,case when y=2026 then '2025/2026' else y::text end,make_date(y,1,1),case when y=max(y) over() then null else now() end
 from (select season y from club_private.matches union select season from club_private.rounds union select 2026) t
 on conflict(id) do nothing;
 alter table club_private.seasons enable row level security;

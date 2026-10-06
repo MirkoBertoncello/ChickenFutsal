@@ -218,3 +218,5 @@ finché l'email non viene nuovamente associata a un giocatore.
 
 ### Stagioni personalizzate
 Eseguire in Supabase SQL Editor `supabase/migrations/20261006_custom_seasons.sql` dopo le migrazioni precedenti. Gli admin trovano “Inizia nuova stagione” nella barra superiore: nome libero (es. 2026/2027) e data d’inizio. La chiusura precedente è atomica, conserva i dati e chiude i turni aperti senza assegnare automaticamente i premi. Le partite pendenti vanno prima registrate o annullate. Lo storico è consultabile nel selettore stagioni; le operazioni su partite e votazioni delle stagioni chiuse sono bloccate dal server. I giocatori, permessi e sei valutazioni restano; gol, autogol, presenze e voti sono distinti per stagione. Le partite possono attraversare il 31 dicembre.
+
+Per rinominare la stagione attiva in **2025/2026**, eseguire `supabase/migrations/20261006_current_season_label.sql`. L’apertura delle votazioni di ciascun premio è riservata agli admin, anche sul server; non è automatica al cambio stagione.

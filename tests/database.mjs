@@ -105,6 +105,9 @@ await db.exec(await readFile(new URL('../supabase/migrations/20261006_custom_sea
 await as(1);
 let active=(await db.query('select public.club_snapshot(null) x')).rows[0].x;
 assert.equal(active.activeSeason,2026);
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261006_current_season_label.sql',import.meta.url),'utf8'));await as(3);
+await rejects(()=>act('round_open',{season:2026,award:'pollone'}));await as(1);
+assert.equal((await snapshot()).seasonInfo.name,'2025/2026');
 await as(3);await rejects(()=>act('season_start',{previous:2026,name:'2026/2027',started_on:'2026-09-01'}));await as(1);
 await act('match',{season:2026,date:'2026-12-03',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});
 await rejects(()=>act('season_start',{previous:2026,name:'2026/2027',started_on:'2026-09-01'}));
