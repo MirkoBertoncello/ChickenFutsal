@@ -99,4 +99,24 @@ await as(2);await rejects(()=>snapshot());await as(1,'supabase_auth_admin');asse
 
 await db.exec('reset role');await db.query(`select set_config('request.test_uid','00000000-0000-0000-0000-000000000099',false)`);await db.exec('set role authenticated');await rejects(()=>snapshot());
 await db.exec('reset role;set role anon');await rejects(()=>hook('p1@test.invalid'));let health=(await db.query('select public.club_health() x')).rows[0].x;assert.equal(health.ok,true);await rejects(()=>snapshot());
+// Upgrade an existing database, then verify non-calendar seasons and archived writes.
+await db.exec('reset role');
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_custom_seasons.sql',import.meta.url),'utf8'));
+await as(1);
+let active=(await db.query('select public.club_snapshot(null) x')).rows[0].x;
+assert.equal(active.activeSeason,2026);
+await as(3);await rejects(()=>act('season_start',{previous:2026,name:'2026/2027',started_on:'2026-09-01'}));await as(1);
+await act('match',{season:2026,date:'2026-12-03',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});
+await rejects(()=>act('season_start',{previous:2026,name:'2026/2027',started_on:'2026-09-01'}));
+await db.exec('reset role');await db.exec("update club_private.matches set cancelled_at=now() where result is null and cancelled_at is null");await as(1);
+const next=await act('season_start',{previous:2026,name:'2026/2027',started_on:'2026-09-01'});
+active=(await db.query('select public.club_snapshot(null) x')).rows[0].x;
+assert.equal(active.season,next.id);assert.equal(active.seasonInfo.name,'2026/2027');assert.ok(active.players.every(p=>p.goals===0&&p.apps===0));
+await rejects(()=>act('season_start',{previous:2026,name:'duplicate',started_on:'2026-09-01'}));
+await rejects(()=>act('result',{id:historic.id,result:historicResult}));
+await rejects(()=>act('round_open',{season:2026,award:'bidone'}));
+const crossYear=await act('match',{season:next.id,date:'2026-12-10',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});
+assert.ok(crossYear.id);
+const january=await act('match',{season:next.id,date:'2027-01-14',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});assert.ok(january.id);
+assert.ok((await snapshot()).seasonInfo.closed_at);
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

@@ -1,7 +1,7 @@
 'use strict';
 // REST Supabase: nessuna credenziale privilegiata nel browser.
 const config=window.CLUB_CONFIG||{},online=!!(config.supabaseUrl&&config.supabasePublishableKey);
-let season=new Date().getFullYear(),session=null,busy=false,cloudReady=false;
+let season=null,session=null,busy=false,cloudReady=false;
 const originalRender=render;
 let tokenRefresh=null;
 try{session=JSON.parse(sessionStorage.getItem('club-session')||'null')}catch{}
@@ -18,12 +18,12 @@ function storeSession(s){session=s;if(s){sessionStorage.setItem('club-session',J
 async function refreshToken(){if(!session?.refresh_token)return;try{storeSession(await request('/auth/v1/token?grant_type=refresh_token',{refresh_token:session.refresh_token},false))}catch{storeSession(null);loginView('Sessione scaduta. Accedi di nuovo.')}}
 async function rpc(name,body={}){return request('/rest/v1/rpc/'+name,body)}
 async function reload(){
- if(!online)return render();
+ if(!online){updateDemoSeason();return render()}
  if(!session?.access_token)return loginView();
  if(session.expires_at&&session.expires_at*1000<Date.now()+60000)await refreshToken();
  if(!session)return;
  const data=await rpc('club_snapshot',{p_season:season});
- state={...data,votes:{},voteOpen:false};user=data.user;cloudReady=true;render();
+ season=data.season;state={...data,votes:{},voteOpen:false};user=data.user;cloudReady=true;render();
 }
 function loginView(message=''){
  cloudReady=false;$('#nav').innerHTML='';$('.identity').innerHTML='<span class="badge">Accesso al gruppo</span>';
@@ -64,23 +64,27 @@ render=function(){
   $('footer').textContent='Dati condivisi su Supabase · Notifiche push disponibili dopo la configurazione';
   $('.top small').textContent=`Stagione ${season} · Il nostro gruppo`;
  }else $('footer').textContent='Modalità demo · Solo dati locali · Account e notifiche simulati';
- const years=[...new Set([season,...(state.seasons||[]),...state.matches.map(m=>+m.date.slice(0,4)),...(admin()?[new Date().getFullYear(),new Date().getFullYear()+1]:[])])].sort((a,b)=>b-a);
- $('#app').insertAdjacentHTML('afterbegin',`<div class="toolbar" style="margin-top:20px;margin-bottom:0"><select aria-label="Stagione" onchange="changeSeason(this.value)">${years.map(y=>`<option ${y===season?'selected':''}>${y}</option>`).join('')}</select><button class="btn small secondary" onclick="refreshView()">↻ Aggiorna</button><button class="btn small secondary" onclick="showNotifications()">♧ Avvisi ${state.notifications.filter(n=>!n.seen).length||''}</button>${online?'<button class="btn small secondary" onclick="enablePush()">Attiva notifiche</button>':'<span class="badge">Demo locale</span>'}</div>`);
- $('.sidebar-bottom').innerHTML=`IL NOSTRO CAMPIONATO<br><b style="color:white">Stagione ${season}</b><br><br>Il giovedì non si prendono impegni.`;
+ const options=state.seasonOptions||[{id:season||2026,name:String(season||2026)}];
+ $('.top small').textContent=`Stagione ${seasonName()} · Il nostro gruppo`;
+ $('#app').insertAdjacentHTML('afterbegin',`<div class="toolbar" style="margin-top:20px;margin-bottom:0"><select aria-label="Stagione" onchange="changeSeason(this.value)">${options.map(y=>`<option value="${y.id}" ${y.id===season?'selected':''}>${esc(y.name)}${y.closed_at?' · chiusa':' · attiva'}</option>`).join('')}</select><button class="btn small secondary" onclick="refreshView()">↻ Aggiorna</button><button class="btn small secondary" onclick="showNotifications()">♧ Avvisi ${state.notifications.filter(n=>!n.seen).length||''}</button>${admin()?'<button class="btn small" onclick="startSeason()">Inizia nuova stagione</button>':''}${online?'<button class="btn small secondary" onclick="enablePush()">Attiva notifiche</button>':'<span class="badge">Demo locale</span>'}</div>${state.seasonInfo?.closed_at?'<div class="notice">Stagione chiusa · storico in sola lettura.</div>':''}`);
+ $('.sidebar-bottom').innerHTML=`IL NOSTRO CAMPIONATO<br><b style="color:white">Stagione ${seasonName()}</b><br><br>Il giovedì non si prendono impegni.`;
 };
-async function changeSeason(value){season=+value;try{await reload()}catch(e){toast(e.message)}}
+async function changeSeason(value){if(!online)storeDemoTotals();season=+value;try{await reload()}catch(e){toast(e.message)}}
 async function refreshView(){try{await reload();toast(online?'Dati aggiornati dal server':'Demo aggiornata')}catch(e){toast(e.message)}}
 async function action(name,data,success){
  if(busy)return false;busy=true;
  try{
-  if(online)await rpc('club_action',{p_action:name,p_data:data});else demoAction(name,data);
+  if(online){const result=await rpc('club_action',{p_action:name,p_data:data});if(name==='season_start')season=result.id;}else demoAction(name,data);
   await reload();if(success)toast(success);return true;
  }catch(e){toast(e.message);return false}finally{busy=false}
 }
 save=function(){if(!online)localStorage.setItem('pollone-v1',JSON.stringify(state))};
 function demoAction(name,d){
  const id=()=>{state.demoNextId=Math.max(Date.now(),(state.demoNextId||0)+1);return state.demoNextId};state.rounds??=[];state.demoBallots??={};
+ if(state.seasonInfo?.closed_at&&['match','result','match_cancel','round_open','round_close','round_final','vote'].includes(name))throw Error('Stagione chiusa: lo storico è consultabile');
  switch(name){
+ case 'season_start':{if(!admin())throw Error('Operazione riservata agli admin');if(state.demoAllMatches.some(m=>m.season===state.activeSeason&&!m.done&&!m.cancelled))throw Error('Registra o annulla prima le partite in programma');storeDemoTotals();const old=state.seasonOptions.find(s=>s.id===state.activeSeason);old.closed_at=new Date().toISOString();for(const r of state.rounds)if(r.season===old.id&&r.status==='open')r.status='closed';season=Math.max(...state.seasonOptions.map(s=>s.id))+1;state.seasonOptions.push({id:season,name:d.name,started_on:d.started_on,closed_at:null});state.activeSeason=season;break}
+
  case 'ratings':p(d.id).ratings=d.ratings;break;
  case 'permission':p(d.id)[d.key]=d.value;break;
  case 'player_delete':{if(d.id===user)throw Error('Non puoi eliminare il tuo profilo admin');if(state.matches.some(m=>!m.cancelled&&!m.done&&[...m.a,...m.b].includes(d.id)))throw Error('Annulla prima le partite in programma');state.players=state.players.filter(x=>x.id!==d.id);state.notifications=state.notifications.filter(n=>!n.to?.includes(d.id));for(const r of state.rounds){r.candidates=r.candidates.filter(x=>x!==d.id);r.results=r.results.filter(x=>x.id!==d.id);r.count=r.results.reduce((s,x)=>s+x.count,0)}break}
@@ -99,7 +103,7 @@ function demoAction(name,d){
 }
 
 const legacyAwards=awards;
-awards=function(){return legacyAwards().replaceAll('Stagione 2026',`Stagione ${season}`)+['pollone','bidone'].map(a=>{const r=currentRounds(a).at(-1);return r?.status==='final'?`<div class="notice"><strong>${a==='pollone'?'Pollone':'Bidone'} d’oro:</strong> ${winners(r)}</div>`:''}).join('')};pages.awards=awards;
+awards=function(){return legacyAwards().replaceAll('Stagione 2026',`Stagione ${seasonName()}`)+['pollone','bidone'].map(a=>{const r=currentRounds(a).at(-1);return r?.status==='final'?`<div class="notice"><strong>${a==='pollone'?'Pollone':'Bidone'} d’oro:</strong> ${winners(r)}</div>`:''}).join('')};pages.awards=awards;
 function currentRounds(award){return (state.rounds||[]).filter(r=>r.award===award&&(!r.season||r.season===season)).sort((a,b)=>a.turn-b.turn)}
 function hasVoted(r){return online?r.voted:!!state.demoBallots?.[`${r.id}:${user}`]}
 function aggregate(r){
@@ -108,7 +112,7 @@ function aggregate(r){
 votes=function(){
  return heading('Il tuo voto fa la differenza','Da 1 a 4 turni per premio. I voti ripartono da zero a ogni turno.')+`<div class="notice">🔒 Le scelte individuali sono nascoste agli admin dell’app. Puoi votare te stesso se sei ancora candidato. Gli eliminati continuano a votare.${online?'':' In questa demo la segretezza è simulata.'}</div><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${['pollone','bidone'].map(award=>{
  const rs=currentRounds(award),r=rs.at(-1),title=award==='pollone'?'Pollone d’oro':'Bidone d’oro';
- return `<section class="card"><div class="award-icon">${award==='pollone'?'🌟':'🪣'}</div><h2>${title}</h2><p class="muted">${award==='pollone'?'Il miglior giocatore dell’anno.':'Il bidone dell’anno.'}</p>${!r?`<div class="notice">Votazione non ancora aperta.</div>${admin()?`<button class="btn" onclick="openFirstRound('${award}')">Apri primo turno</button>`:''}`:`<span class="badge">Turno ${r.turn} / 4 · ${r.candidates.length} candidati · ${r.status==='open'?'Aperto':r.status==='final'?'Premio assegnato':'Chiuso'}</span><p class="muted">${r.count} schede ricevute</p>${r.status==='open'?(hasVoted(r)?'<div class="notice">✓ Hai già votato in questo turno.</div>':`<form onsubmit="castVote(event,${r.id})"><div class="field"><label for="vote-${r.id}">Scegli il tuo candidato</label><select id="vote-${r.id}" required><option value="">Scegli un giocatore</option>${r.candidates.map(id=>`<option value="${id}">${esc(p(id).name)}${id===user?' (tu)':''}</option>`).join('')}</select></div><button class="btn">Invia voto segreto</button></form>`)+`${admin()?`<p><button class="btn secondary" onclick="closeRound(${r.id})">Chiudi turno e mostra risultati</button></p>`:''}`:aggregate(r)+`${r.status==='final'?`<div class="notice">${winners(r)}</div>`:admin()?`<div class="toolbar" style="margin-top:20px">${r.turn<4?`<button class="btn" onclick="chooseCandidates(${r.id})">Apri turno ${r.turn+1}</button>`:''}<button class="btn secondary" ${!r.count&&r.candidates.length?'disabled':''} onclick="finalRound(${r.id})">Concludi il premio</button></div>`:''}`}`}${rs.length>1?`<details style="margin-top:25px"><summary>Storico dei turni precedenti</summary>${rs.slice(0,-1).map(old=>`<h3 style="margin-top:20px">Turno ${old.turn}</h3>${aggregate(old)}`).join('')}</details>`:''}</section>`
+ return `<section class="card"><div class="award-icon">${award==='pollone'?'🌟':'🪣'}</div><h2>${title}</h2><p class="muted">${award==='pollone'?'Il miglior giocatore della stagione.':'Il bidone della stagione.'}</p>${!r?`<div class="notice">Votazione non ancora aperta.</div>${admin()?`<button class="btn" onclick="openFirstRound('${award}')">Apri primo turno</button>`:''}`:`<span class="badge">Turno ${r.turn} / 4 · ${r.candidates.length} candidati · ${r.status==='open'?'Aperto':r.status==='final'?'Premio assegnato':'Chiuso'}</span><p class="muted">${r.count} schede ricevute</p>${r.status==='open'?(hasVoted(r)?'<div class="notice">✓ Hai già votato in questo turno.</div>':`<form onsubmit="castVote(event,${r.id})"><div class="field"><label for="vote-${r.id}">Scegli il tuo candidato</label><select id="vote-${r.id}" required><option value="">Scegli un giocatore</option>${r.candidates.map(id=>`<option value="${id}">${esc(p(id).name)}${id===user?' (tu)':''}</option>`).join('')}</select></div><button class="btn">Invia voto segreto</button></form>`)+`${admin()?`<p><button class="btn secondary" onclick="closeRound(${r.id})">Chiudi turno e mostra risultati</button></p>`:''}`:aggregate(r)+`${r.status==='final'?`<div class="notice">${winners(r)}</div>`:admin()?`<div class="toolbar" style="margin-top:20px">${r.turn<4?`<button class="btn" onclick="chooseCandidates(${r.id})">Apri turno ${r.turn+1}</button>`:''}<button class="btn secondary" ${!r.count&&r.candidates.length?'disabled':''} onclick="finalRound(${r.id})">Concludi il premio</button></div>`:''}`}`}${rs.length>1?`<details style="margin-top:25px"><summary>Storico dei turni precedenti</summary>${rs.slice(0,-1).map(old=>`<h3 style="margin-top:20px">Turno ${old.turn}</h3>${aggregate(old)}`).join('')}</details>`:''}</section>`
  }).join('')}</div><div class="notice">I risultati dell’ultimo turno determinano il vincitore. In caso di parità mostriamo tutti i primi a pari merito: fino al terzo turno puoi aprire uno spareggio come turno successivo.</div>`;
 };pages.votes=votes;
 function winners(r){if(!r.results.length)return 'Nessun vincitore: non sono rimaste schede valide.';let max=Math.max(...r.results.map(x=>x.count));let ws=r.results.filter(x=>x.count===max).map(x=>esc(p(x.id).name));return ws.length>1?'Pari merito: '+ws.join(', '):'Vincitore: '+ws.join('')}
@@ -118,7 +122,7 @@ async function closeRound(id){modal('Chiudi il turno?',`<p>I voti diventano defi
 async function confirmCloseRound(id){if(await action('round_close',{id},'Turno chiuso'))$('#modal').close()}
 function chooseCandidates(id){let r=state.rounds.find(r=>r.id===id);modal('Candidati del prossimo turno',`<p class="muted">Scegli quanti e quali candidati mantenere. I risultati precedenti sono un suggerimento; ogni voto del nuovo turno partirà da zero.</p><form onsubmit="startNextRound(event,${id})"><div class="checklist">${r.candidates.slice().sort((a,b)=>(r.results.find(x=>x.id===b)?.count||0)-(r.results.find(x=>x.id===a)?.count||0)).map(pid=>`<label class="check"><input type="checkbox" name="candidate" value="${pid}">${esc(p(pid).name)} · ${r.results.find(x=>x.id===pid)?.count||0} voti</label>`).join('')}</div><button class="btn">Apri turno ${r.turn+1}</button></form>`)}
 async function startNextRound(e,id){e.preventDefault();let r=state.rounds.find(r=>r.id===id),candidates=[...document.querySelectorAll('[name=candidate]:checked')].map(x=>+x.value);if(!candidates.length)return toast('Seleziona almeno un candidato');if(await action('round_open',{season,award:r.award,candidates},'Nuovo turno aperto · voti azzerati'))$('#modal').close()}
-function finalRound(id){modal('Concludi questo premio?',`<p>Il risultato di questo turno sarà il risultato finale. Non potrai aprire altri turni per questo premio nella stagione ${season}.</p><button class="btn" onclick="confirmFinal(${id})">Conferma assegnazione</button>`)}
+function finalRound(id){modal('Concludi questo premio?',`<p>Il risultato di questo turno sarà il risultato finale. Non potrai aprire altri turni per questo premio nella stagione ${seasonName()}.</p><button class="btn" onclick="confirmFinal(${id})">Conferma assegnazione</button>`)}
 async function confirmFinal(id){if(await action('round_final',{id},'Premio concluso'))$('#modal').close()}
 saveRatings=async function(e,id){e.preventDefault();if(await action('ratings',{id,ratings:labels.map((_,i)=>+$('#r'+i).value)},'Valutazioni aggiornate'))$('#modal').close()};
 permission=async function(id,key,value){await action('permission',{id,key,value},'Permessi aggiornati')};
@@ -168,3 +172,19 @@ function deletePlayer(id){
  modal('Elimina definitivamente il giocatore',`<p>Stai eliminando <strong>${esc(x.name)}</strong>.</p><div class="notice">Il profilo, l’email associata, gli avvisi e i voti espressi o ricevuti saranno rimossi. I risultati delle votazioni saranno aggiornati. Le partite passate conserveranno il tabellino con “Giocatore eliminato”, senza alterare i risultati o le statistiche degli altri. L’accesso al gruppo verrà revocato. Prima devi annullare le eventuali partite in programma in cui è convocato.</div><form onsubmit="confirmPlayerDeletion(event,${id})"><div class="field"><label for="delete-player-confirm">Scrivi ELIMINA per confermare</label><input id="delete-player-confirm" autocomplete="off" required pattern="ELIMINA"></div><div class="modal-actions"><button type="button" class="btn secondary" onclick="document.querySelector('#modal').close()">Torna indietro</button><button class="btn">Elimina definitivamente</button></div></form>`);
 }
 async function confirmPlayerDeletion(e,id){e.preventDefault();if($('#delete-player-confirm').value!=='ELIMINA')return;if(await action('player_delete',{id},'Giocatore eliminato · accesso revocato'))$('#modal').close()}
+
+function seasonName(){return esc(state.seasonOptions?.find(s=>s.id===season)?.name||String(season||2026))}
+function startSeason(){if(!admin())return;modal('Inizia nuova stagione',`<div class="notice">Chiuderai automaticamente la stagione attiva. Statistiche, partite e voti resteranno nello storico. I turni aperti verranno chiusi senza assegnare automaticamente i premi. Registra o annulla prima le partite ancora in programma.</div><form onsubmit="confirmSeasonStart(event)"><div class="field"><label for="season-name">Nome della nuova stagione</label><input id="season-name" placeholder="Es. 2026/2027" maxlength="60" required></div><div class="field"><label for="season-date">Data d’inizio</label><input id="season-date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><button class="btn">Chiudi precedente e inizia nuova stagione</button></form>`)}
+async function confirmSeasonStart(e){e.preventDefault();if(await action('season_start',{name:$('#season-name').value.trim(),started_on:$('#season-date').value,previous:state.activeSeason},'Nuova stagione iniziata'))$('#modal').close()}
+function updateDemoSeason(){
+ if(!state.seasonOptions){season=2026;state.activeSeason=season;state.seasonOptions=[{id:season,name:'2026',started_on:'2026-01-01',closed_at:null}];for(const m of state.matches)m.season??=season;for(const r of state.rounds||[])r.season??=season;state.demoAllMatches=state.matches;state.demoBaseline=Object.fromEntries(state.players.map(p=>[p.id,{goals:p.goals,own:p.own,apps:p.apps}]))}
+ season??=state.activeSeason;state.seasonInfo=state.seasonOptions.find(s=>s.id===season);
+ // Keep the complete calendar while displaying one season.
+ for(const m of state.matches)if(!state.demoAllMatches.some(x=>x.id===m.id))state.demoAllMatches.push(m);
+ state.matches=state.demoAllMatches.filter(m=>m.season===season);
+ for(const p of state.players){if(state.demoDisplayedSeason===season)continue;const base=state.demoSeasonTotals?.[season]?.[p.id]||(season===2026?state.demoBaseline[p.id]:null);p.goals=base?.goals||0;p.own=base?.own||0;p.apps=base?.apps||0;}
+ state.demoDisplayedSeason=season;save();
+}
+if(!online){updateDemoSeason();render()}
+
+function storeDemoTotals(){state.demoSeasonTotals??={};state.demoSeasonTotals[season]=Object.fromEntries(state.players.map(p=>[p.id,{goals:p.goals,own:p.own,apps:p.apps}]))}
