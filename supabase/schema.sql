@@ -413,8 +413,8 @@ revoke all on function public.club_action(text,jsonb) from public,anon;
 grant execute on function public.club_action(text,jsonb) to authenticated;
 
 -- Controllo quotidiano: nessun dato personale, nessuna modifica al database.
-create function public.club_health() returns jsonb language sql stable security definer set search_path='' as $$
- select jsonb_build_object('ok',true,'configured',exists(select 1 from club_private.members))
+create function public.club_health() returns jsonb language sql stable security invoker set search_path='' as $$
+ select jsonb_build_object('ok',true)
 $$;
 revoke all on function public.club_health() from public;
 grant execute on function public.club_health() to anon,authenticated;
@@ -479,4 +479,13 @@ begin
  for sid in select id from club_private.seasons where closed_at is not null loop
   perform club_private.capture_awards(sid);
  end loop;
+end $$;
+
+-- Funzione tecnica creata dall'opzione Supabase "Enable automatic RLS".
+-- Il trigger continua a funzionare con il proprio proprietario; il browser non deve invocarlo.
+do $$
+begin
+ if to_regprocedure('public.rls_auto_enable()') is not null then
+  execute 'revoke execute on function public.rls_auto_enable() from public,anon,authenticated';
+ end if;
 end $$;

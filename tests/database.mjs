@@ -196,4 +196,21 @@ await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/mi
 assert.deepEqual((await db.query('select public.club_snapshot($1) x',[next.id])).rows[0].x.closedAwards,frozen);
 await rejects(()=>db.query('select * from club_private.season_awards'));await rejects(()=>db.query('select club_private.capture_awards($1)',[next.id]));
 await db.exec('reset role;set role anon');await rejects(()=>snapshot());
+// Hardening: anonymous health has no elevated rights; automatic RLS trigger survives ACL changes.
+await db.exec('reset role');
+await db.exec(`create function public.rls_auto_enable() returns event_trigger language plpgsql security definer set search_path='' as $$declare cmd record;begin
+for cmd in select * from pg_event_trigger_ddl_commands() where command_tag='CREATE TABLE' and schema_name='public' loop
+ execute format('alter table %s enable row level security',cmd.object_identity);
+end loop;end$$;
+create event trigger test_auto_rls on ddl_command_end when tag in ('CREATE TABLE') execute function public.rls_auto_enable();
+grant execute on function public.rls_auto_enable() to anon,authenticated;`);
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_security_advisor_hardening.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_security_advisor_hardening.sql',import.meta.url),'utf8'));
+assert.equal((await db.query("select prosecdef from pg_proc where oid='public.club_health()'::regprocedure")).rows[0].prosecdef,false);
+for(const role of ['anon','authenticated'])assert.equal((await db.query("select has_function_privilege($1,'public.rls_auto_enable()','EXECUTE') allowed",[role])).rows[0].allowed,false);
+await db.exec('create table public.test_automatic_rls(id integer)');assert.equal((await db.query("select relrowsecurity from pg_class where oid='public.test_automatic_rls'::regclass")).rows[0].relrowsecurity,true);
+await db.exec('set role anon');assert.deepEqual((await db.query('select public.club_health() x')).rows[0].x,{ok:true});await rejects(()=>snapshot());
+await as(3);assert.ok((await snapshot()).user===3);await rejects(()=>act('player',{name:'Unauthorized',role:'Regista'}));
+await db.exec('reset role');await db.exec('drop event trigger test_auto_rls;drop table public.test_automatic_rls;drop function public.rls_auto_enable()');
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_security_advisor_hardening.sql',import.meta.url),'utf8'));
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
