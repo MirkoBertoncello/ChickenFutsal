@@ -12,3 +12,10 @@
   Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
+
+/push-setup.html
+  Cache-Control: no-store
+/push-setup.sql
+  Cache-Control: no-store
+/send-push-source.txt
+  Cache-Control: no-cache

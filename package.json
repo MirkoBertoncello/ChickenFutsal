@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node tests/frontend.cjs && node tests/database.mjs",
+    "test": "node tests/frontend.cjs && node tests/database.mjs && node tests/push-setup.cjs",
     "preview": "python3 -m http.server 8080 --directory web"
   },
   "devDependencies": {

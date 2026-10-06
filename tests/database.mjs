@@ -122,4 +122,25 @@ const crossYear=await act('match',{season:next.id,date:'2026-12-10',time:'21:00'
 assert.ok(crossYear.id);
 const january=await act('match',{season:next.id,date:'2027-01-14',time:'21:00',field:'Jumbo',a:[1,3,4,5,6],b:[7,8,9,10,11]});assert.ok(january.id);
 assert.ok((await snapshot()).seasonInfo.closed_at);
+// Push configuration is readable only by members; scheduler setup is transactional and repeatable.
+await db.exec('reset role');
+await db.exec(await readFile(new URL('../supabase/migrations/20261006_push_config.sql',import.meta.url),'utf8'));
+await as(3);assert.equal((await db.query('select public.club_push_config() x')).rows[0].x.publicKey,null);
+await db.exec('reset role;set role anon');await rejects(()=>db.query('select public.club_push_config()'));
+await db.exec('reset role');
+await db.exec(`create schema vault;create schema cron;create schema net;
+create table vault.secrets(id uuid default gen_random_uuid(),name text unique,decrypted_secret text);
+create view vault.decrypted_secrets as select * from vault.secrets;
+create function vault.create_secret(v text,n text) returns uuid language plpgsql as $$declare i uuid;begin insert into vault.secrets(name,decrypted_secret)values(n,v)returning id into i;return i;end$$;
+create function vault.update_secret(i uuid,v text,n text) returns void language sql as $$update vault.secrets set name=n,decrypted_secret=v where id=i$$;
+create table cron.jobs(name text primary key,schedule text,command text);
+create function cron.schedule(n text,s text,c text) returns bigint language plpgsql as $$begin insert into cron.jobs values(n,s,c)on conflict(name)do update set schedule=s,command=c;return 1;end$$;`);
+let pushSql=await readFile(new URL('../web/push-setup.sql',import.meta.url),'utf8');
+pushSql=pushSql.replace(/^create extension.*;$/gm,'').replaceAll('__PUBLIC_KEY__','B'.repeat(87)).replaceAll('__PROJECT_URL__','https://test.supabase.co').replaceAll('__PUBLISHABLE_KEY__','public-key').replaceAll('__CRON_SECRET__','test-cron-secret');
+await db.exec(pushSql);await db.exec(pushSql);
+assert.equal((await db.query('select count(*) n from cron.jobs')).rows[0].n,1);
+assert.equal((await db.query('select count(*) n from vault.secrets')).rows[0].n,3);
+await as(3);assert.equal((await db.query('select public.club_push_config() x')).rows[0].x.publicKey,'B'.repeat(87));
+await rejects(()=>db.query('select * from club_private.push_config'));
+await db.exec('reset role');await rejects(()=>db.exec(pushSql.replaceAll('B'.repeat(87),'C'.repeat(87))));await db.exec('rollback');
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

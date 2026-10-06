@@ -23,6 +23,7 @@ async function reload(){
  if(session.expires_at&&session.expires_at*1000<Date.now()+60000)await refreshToken();
  if(!session)return;
  const data=await rpc('club_snapshot',{p_season:season});
+ try{const push=await rpc('club_push_config');if(push.publicKey)config.vapidPublicKey=push.publicKey}catch{}
  season=data.season;state={...data,votes:{},voteOpen:false};user=data.user;cloudReady=true;render();
 }
 function loginView(message=''){
@@ -132,18 +133,21 @@ savePlayer=async function(e){e.preventDefault();if(await action('player',{name:$
 confirmMatch=async function(){if(!draft)return;const data={...draft,season};if(await action('match',data,online?'Partita salvata · avvisi creati per i 10 convocati':'Partita creata · notifiche simulate')){draft=null;$('#modal').close();go('matches')}};
 saveResult=async function(e,id){e.preventDefault();let m=state.matches.find(x=>x.id===id),result={};for(const pid of [...m.a,...m.b]){let r={goals:+$('#g'+pid).value,own:+$('#o'+pid).value,present:$('#p'+pid).checked};if(!Number.isInteger(r.goals)||!Number.isInteger(r.own)||r.goals<0||r.own<0||r.goals>99||r.own>99)return toast('Inserisci numeri interi da 0 a 99');if(!r.present&&(r.goals||r.own))return toast('Un assente non può segnare');result[pid]=r}if(await action('result',{id,result},'Risultato salvato · statistiche ricalcolate'))$('#modal').close()};
 const legacySettings=settings;
-settings=function(){return legacySettings().replace('Notifiche simulate',online?'I tuoi avvisi':'Notifiche simulate')+ (admin()?`<div class="card" style="margin-top:20px"><h3>Accesso dei giocatori</h3><p class="muted">Associa l’email con cui ciascun amico creerà il proprio account. Nessuna email di invito viene inviata da questa schermata.</p>${state.players.map(x=>`<div class="row spread leader"><div><strong>${esc(x.name)}</strong><small class="muted">${esc(x.email||(x.occasional?'Occasionale · senza account':'Nessuna email associata'))}</small></div><button class="btn small secondary" onclick="invitePlayer(${x.id})">${x.occasional?'Abilita account':'Associa email'}</button></div>`).join('')}</div>`:'')};pages.settings=settings;
+settings=function(){return (admin()?'<div class="card" style="margin-bottom:20px"><h3>Notifiche sul telefono</h3><p>Configura il servizio di invio su Supabase. Ogni partecipante dovrà poi premere Attiva notifiche sul proprio dispositivo.</p><a class="btn" href="/push-setup.html" target="_blank" rel="noopener">Configura notifiche push</a></div>':'')+legacySettings().replace('Notifiche simulate',online?'I tuoi avvisi':'Notifiche simulate')+ (admin()?`<div class="card" style="margin-top:20px"><h3>Accesso dei giocatori</h3><p class="muted">Associa l’email con cui ciascun amico creerà il proprio account. Nessuna email di invito viene inviata da questa schermata.</p>${state.players.map(x=>`<div class="row spread leader"><div><strong>${esc(x.name)}</strong><small class="muted">${esc(x.email||(x.occasional?'Occasionale · senza account':'Nessuna email associata'))}</small></div><button class="btn small secondary" onclick="invitePlayer(${x.id})">${x.occasional?'Abilita account':'Associa email'}</button></div>`).join('')}</div>`:'')};pages.settings=settings;
 function choosePlayerKind(){const guest=$('#new-kind').value==='guest';$('#new-email-field').hidden=guest;$('#new-email').disabled=guest;if(guest)$('#new-email').value='';$('#new-kind-description').textContent=guest?'Partecipa alle partite e ha statistiche ed esagono. Non ha accesso al sito e non riceve notifiche.':'Puoi associare l’email ora o in seguito. Nessuna email di invito viene inviata automaticamente.'}
 function invitePlayer(id){modal('Accesso · '+esc(p(id).name),`<form onsubmit="saveInvite(event,${id})"><div class="field"><label for="invite-email">Email del giocatore</label><input id="invite-email" type="email" value="${esc(p(id).email||'')}" required></div><button class="btn">Salva email</button></form>`)}
 async function saveInvite(e,id){e.preventDefault();if(await action('invite',{id,email:$('#invite-email').value.trim()},'Email associata'))$('#modal').close()}
 function showNotifications(){let ns=online?state.notifications:state.notifications.filter(n=>n.to.includes(user));modal('I tuoi avvisi',ns.map(n=>`<div class="leader"><p>${esc(n.text)}</p><div class="toolbar">${n.matchId?`<button class="btn small secondary" onclick="showMatch(${n.matchId})">Vedi partita</button>`:''}${!n.seen?`<button class="btn small secondary" onclick="markSeen(${n.id})">Segna come letto</button>`:'<span class="badge">Letto</span>'}</div></div>`).join('')||'<p class="muted">Nessun avviso per te.</p>')}
 async function markSeen(id){if(await action('seen',{id}))showNotifications()}
 async function enablePush(){
- if(!config.vapidPublicKey)return toast('Notifiche push non ancora configurate. Le convocazioni sono disponibili negli Avvisi.');
+ if(!online)return toast('Le notifiche push richiedono l’accesso al sito condiviso');
+ if(!config.vapidPublicKey){try{const push=await rpc('club_push_config');config.vapidPublicKey=push.publicKey||''}catch{}}
+ if(!config.vapidPublicKey)return toast('Configurazione push da completare: un admin trova la guida nelle Impostazioni.');
  if(!('serviceWorker' in navigator)||!('PushManager' in window))return toast('Dispositivo non compatibile. Su iPhone aggiungi prima il sito alla Home.');
  try{
   const permission=await Notification.requestPermission();if(permission!=='granted')return toast('Consenso alle notifiche non concesso');
-  const reg=await navigator.serviceWorker.ready;
+  const registration=await navigator.serviceWorker.register('/sw.js');
+  const reg=registration.active?registration:await navigator.serviceWorker.ready;
   const raw=atob(config.vapidPublicKey.replace(/-/g,'+').replace(/_/g,'/'));const key=Uint8Array.from(raw,c=>c.charCodeAt(0));
   const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
   await action('push_subscribe',{subscription:sub.toJSON()},'Notifiche attivate su questo dispositivo');
