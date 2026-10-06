@@ -1,0 +1,12 @@
+{
+  "name": "chicken-futsal",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node tests/frontend.cjs && node tests/database.mjs",
+    "preview": "python3 -m http.server 8080 --directory web"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

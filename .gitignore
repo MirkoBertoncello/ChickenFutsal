@@ -1,0 +1,7 @@
+node_modules
+.env
+.env.*
+operations/local-secrets/
+.supabase/
+*.zip
+__pycache__/

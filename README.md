@@ -1,0 +1,161 @@
+# ChickenFutsal — Cloudflare Pages + Supabase
+
+Sito mobile per un gruppo privato di calcetto. Codice pronto per la configurazione;
+nessun account cloud, database o sito pubblico è stato creato in questo passaggio.
+
+## Cosa contiene
+
+- Rosa, esagoni da 1 a 99, statistiche annuali e classifiche.
+- Due squadre da 5, selezione di 10 giocatori distinti e scambio delle formazioni.
+- Tabellini correggibili: i totali derivano dalle partite, senza incrementi duplicati.
+- Account Supabase e inviti tramite associazione email da parte degli admin.
+- Controlli server: admin, visibilità delle statistiche del gruppo, dati personali sempre visibili.
+- Pollone e Bidone con 1–4 turni indipendenti per stagione; primo turno con tutti;
+  turni successivi con candidati scelti dall'admin; un voto a persona per turno,
+  autovoto consentito e voti azzerati; gli eliminati continuano a votare.
+- Risultati aggregati dei voti visibili solo a turno chiuso. Eventuali pari merito
+  restano espliciti; fino al terzo turno è possibile aprire uno spareggio.
+- Avvisi personali alla convocazione; notifiche Web Push quando configurate.
+- Download calendario .ics con orario Europe/Rome.
+- PWA aggiungibile alla Home; richiede connessione per account e dati condivisi.
+- Controllo quotidiano del database, esclusivamente in lettura.
+
+La segretezza è verso gli admin dell'app. Il proprietario del progetto Supabase
+può leggere le tabelle tecniche, comprese le schede: non è anonimato verso l'operatore.
+L'esagono è un profilo corrente; gol, autogol e presenze sono separati per stagione.
+Un solo gruppo per progetto. Ruoli di gioco e nomi vengono impostati all'aggiunta.
+
+## 1. Provare la demo
+
+Dal terminale nella cartella del progetto:
+
+```sh
+python3 -m http.server 8080 --directory web
+```
+
+Aprire http://localhost:8080 sullo stesso computer. La demo usa dati fittizi locali,
+con selettore di identità. Gli account reali e le notifiche non sono attivi.
+`web/config.js` vuoto mantiene la demo: non pubblicarla come gruppo reale.
+
+## 2. Creare il progetto Supabase
+
+1. Creare un account su https://supabase.com/dashboard e una organizzazione Free.
+2. Creare il progetto `chicken-futsal`, scegliendo una regione europea.
+3. Salvare la password del database nel proprio gestore password, senza inviarla in chat.
+4. Nel SQL Editor eseguire `supabase/schema.sql` una sola volta.
+5. Modificare nome ed email in `supabase/setup-admin.sql` ed eseguirlo.
+6. Copiare Project URL e chiave **publishable**, o la vecchia chiave **anon**,
+   nei due campi corrispondenti di `web/config.js`.
+   Non inserire mai `service_role`, secret key, password o chiavi VAPID private nel sito.
+
+Le tabelle sono nello schema privato `club_private`; nessun accesso client diretto.
+Le funzioni RPC controllano membership e permessi. Non aggiungere `club_private`
+agli schemi esposti dalle API. Non concedere agli amici accesso alla console Supabase.
+
+## 3. Configurare gli account
+
+Scegliere una delle opzioni prima di invitare gli amici:
+
+- **Google:** configurare il provider Google in Authentication > Providers,
+  seguendo https://supabase.com/docs/guides/auth/social-login/auth-google.
+  Impostare `googleOAuthEnabled: true` in `web/config.js`. L'accesso Google
+  consente di evitare l'invio di email di conferma; restano obbligatori gli inviti
+  tramite email associata al giocatore.
+- **Email e password:** configurare un SMTP proprio in Supabase Authentication.
+  Il mittente SMTP predefinito Supabase non invia liberamente agli amici:
+  è limitato agli indirizzi del team del progetto e a poche email per ora.
+  Scegliere un provider/mittente già disponibile o un piano gratuito compatibile.
+  Mantenere la conferma email attiva. Non disattivarla per aggirare i limiti.
+
+Documentazione: https://supabase.com/docs/guides/auth/auth-smtp.
+Nella prima configurazione è possibile provare l'account del proprietario,
+ma non aggiungere gli amici al team tecnico Supabase solo per ricevere email.
+
+## 4. Pubblicare Cloudflare Pages
+
+1. Creare un account gratuito su https://dash.cloudflare.com.
+2. Aprire Workers & Pages e creare un progetto Pages tramite **Direct Upload**.
+3. Caricare la cartella `web/`, oppure lo ZIP dei soli file web, con `index.html`
+   alla radice. Il sito non richiede installazioni o build.
+4. Verrà assegnato un URL HTTPS `https://NOME-SCELTO.pages.dev`.
+5. In Supabase Authentication > URL Configuration impostare quell'URL come Site URL
+   e autorizzare lo stesso URL con `/` finale tra i Redirect URLs.
+6. Accedere con l'email indicata nel setup admin. Nel caso email/password, creare
+   l'account e confermarlo prima di accedere.
+7. Aggiungere i giocatori e le loro email dalla sezione Giocatori / Gestione.
+   Ogni amico crea il proprio account o usa Google con la stessa email.
+
+L'associazione email NON invia un'email di invito. Condividere il link del sito
+agli amici; nessun messaggio viene inviato automaticamente agli amici dal progetto.
+Gli account esterni al gruppo ricevono un errore di accesso anche se registrati.
+Tutti consultano gli stessi dati; il pulsante Aggiorna ricarica lo stato dal server.
+
+Direct Upload: https://developers.cloudflare.com/pages/get-started/direct-upload/.
+Conservare una copia privata del codice e del database. I backup automatici non sono
+inclusi nel piano Supabase Free: pianificare esportazioni periodiche tramite CLI.
+
+## 5. Notifiche Web Push (opzionali per il primo collaudo)
+
+Gli avvisi personali nel sito sono già creati quando l'admin convoca la partita.
+Per riceverli anche con il sito chiuso:
+
+1. Sul proprio computer eseguire `node operations/generate-vapid.cjs`.
+   Le chiavi e un CRON_SECRET sono salvati in `operations/local-secrets/vapid.env`,
+   escluso da Git. Non condividere il file, non caricarlo su Pages.
+2. Sostituire il contatto email in VAPID_SUBJECT. Salvare VAPID_PUBLIC_KEY,
+   VAPID_PRIVATE_KEY, VAPID_SUBJECT e CRON_SECRET nei Secrets delle Edge Functions
+   Supabase. SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY sono forniti dal runtime.
+3. Inserire SOLO VAPID_PUBLIC_KEY in `web/config.js` come `vapidPublicKey`.
+4. Distribuire `supabase/functions/send-push` come Edge Function, rispettando
+   `supabase/config.toml`. Il controllo JWT gateway è disattivato per questa sola
+   funzione, che verifica invece CRON_SECRET. Esempio con CLI collegata:
+   `supabase functions deploy send-push --no-verify-jwt`.
+5. Per restare interamente nel cloud, configurare Cron, pg_net e Vault in Supabase
+   e poi eseguire `operations/schedule-push.sql`: invoca la funzione ogni 5 minuti.
+   In alternativa pianificare `operations/send-push.py` sul QNAP, passando
+   SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY e CRON_SECRET mediante un ambiente protetto. Nessuna porta
+   in ingresso sul NAS se scegli questa alternativa: effettua soltanto una richiesta HTTPS in uscita.
+   In alternativa programmare lo stesso POST con un servizio cron che custodisca
+   il segreto; non usare un URL pubblico contenente il segreto.
+6. Ripubblicare `web/` e premere Attiva notifiche sul dispositivo di ogni utente.
+
+Pianificazione cloud: https://supabase.com/docs/guides/functions/schedule-functions.
+Il cron interno non gira se il progetto è in pausa; il controllo quotidiano esterno
+resta distinto.
+
+La consegna dipende dal consenso, dal browser e dal servizio push; il polling della
+coda introduce fino a circa 5 minuti di attesa, più eventuali ritardi/retry.
+Su iPhone aggiungere prima il sito alla Home (iOS 16.4 o successivo).
+Ogni dispositivo si iscrive separatamente. I recapiti push non sono mostrati agli admin.
+Le consegne fallite vengono riprovate fino a 3 volte; gli avvisi restano nel sito.
+La funzione Web Push è predisposta ma non verificata contro provider reali in questa sessione.
+
+## 6. Controllo giornaliero del database
+
+`operations/healthcheck.py` esegue una sola lettura tecnica `club_health()`.
+Non restituisce dati personali e non scrive dati.
+
+- **QNAP:** pianificarlo una volta al giorno con SUPABASE_URL e
+  SUPABASE_PUBLISHABLE_KEY nel suo ambiente.
+- **GitHub Actions:** in un repository privato copiare `operations/daily-health.yml`
+  in `.github/workflows/daily-health.yml`, aggiungere i due valori come Secrets
+  e conservare `operations/healthcheck.py` nel repository. Controllare le quote Actions.
+  L'esecuzione è alle 08:17 UTC: 09:17 in inverno / 10:17 in estate in Italia.
+  I workflow pianificati possono essere ritardati, non sono un servizio garantito.
+
+Questo controllo NON garantisce l'esclusione dalla pausa del piano Free: Supabase
+valuta la scarsa attività su 7 giorni senza pubblicare una soglia esatta.
+Controllare gli avvisi del proprietario e riattivare dalla console se necessario.
+
+## Verifica eseguita
+
+- Sintassi JavaScript e rendering/logica delle schermate mediante test Node.
+- Script SQL eseguito con PostgreSQL locale tramite PGlite.
+- Permessi per membri/admin/anonimi, dati personali, inviti, voti duplicati,
+  autovoto, eliminati che votano, quattro turni, premi indipendenti e nuove stagioni.
+- Correzioni tabellino senza duplicare totali e coda push accessibile solo al servizio.
+
+Per ripetere: `npm install` e `npm test` (Node 20+).
+Non sono stati eseguiti collaudi in un browser reale, su Supabase remoto o di push
+reali. Prima di invitare tutto il gruppo, collaudare con un admin e un giocatore
+su due dispositivi, verificando i permessi, una partita e un turno completo.
