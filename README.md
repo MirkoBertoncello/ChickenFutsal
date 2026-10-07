@@ -277,3 +277,7 @@ Eseguire `supabase/migrations/20261007_player_activation.sql`. Gli admin possono
 Nella schermata di accesso, “Ricordami su questo dispositivo” è facoltativo: salva la sessione in localStorage e ne rinnova i token alla riapertura; senza selezione si usa sessionStorage. “Esci” cancella entrambe le memorie di sessione. La durata effettiva resta soggetta alle impostazioni e alla validità della sessione Supabase; cancellare i dati del browser richiede un nuovo accesso.
 
 Per installazioni esistenti eseguire `supabase/migrations/20261007_device_push.sql` nel SQL Editor di Supabase. Il pulsante indica “Disattiva notifiche” solo se la sottoscrizione del browser, il consenso e la registrazione del membro sul server risultano attivi. La disattivazione rimuove la sola registrazione di questo dispositivo e la sottoscrizione del browser, lasciando gli altri dispositivi e gli avvisi nel sito disponibili. Il consenso del browser può rimanere concesso per una futura riattivazione. Senza la migrazione il controllo dello stato non è disponibile.
+
+### Organizzazione delle partite
+
+Il primo passaggio mostra OVR e ruolo accanto a ogni giocatore. In modalità manuale si assegnano direttamente NERI e BIANCHI: una squadra piena non accetta un sesto giocatore, e liberare un posto la rende nuovamente selezionabile. L’anteprima e la schermata di scambio consentono di tornare al passaggio precedente; data, ora, campo, convocati e scambi rimangono nella bozza finché non si conferma o si avvia una nuova partita.
