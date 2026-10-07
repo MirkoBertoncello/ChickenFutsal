@@ -297,3 +297,7 @@ La stessa immagine compare in rosa, profilo e campetto; senza immagine restano l
 Eseguire `supabase/migrations/20261007_player_images.sql` nel SQL Editor su installazioni esistenti, dopo le migrazioni precedenti. Il file aggiunge il campo immagine e aggiorna snapshot, recupero e RPC per il caricamento. Non eseguire di nuovo vecchie migrazioni che sostituiscono quelle funzioni.
 
 Per gli avatar a 512 px, eseguire anche `supabase/migrations/20261007_player_images_512.sql` dopo la migrazione iniziale delle immagini. Ricaricare gli originali per migliorare le immagini già salvate a 256 px.
+
+### WebP originali fino a 1 MB
+
+Le WebP fino a 1 MiB vengono conservate integralmente, senza ridimensionamento o ricompressione, dopo verifica che siano immagini leggibili. PNG e JPEG continuano a essere convertiti e ridimensionati a 512 px. Le dimensioni visualizzate in profilo, rosa e campetto non cambiano. Eseguire `supabase/migrations/20261007_player_images_original_webp.sql` dopo le migrazioni delle immagini precedenti: aumenta il limite del data URL a 1.398.127 caratteri (circa 1 MiB binario codificato base64). Per recuperare qualità delle vecchie immagini occorre ricaricare le WebP originali. Le immagini continuano a occupare spazio nel database e a essere trasferite nello snapshot del gruppo.

@@ -733,7 +733,7 @@ returns jsonb language plpgsql security definer set search_path='' as $$
 declare v_actor bigint:=club_private.actor();v_name text;v_actor_name text;v_had boolean;
 begin
  if not exists(select 1 from club_private.members where player_id=v_actor and is_admin) then raise exception 'Operazione riservata agli admin';end if;
- if p_image is not null and (length(p_image)>262144 or p_image !~ '^data:image/(png|webp);base64,[A-Za-z0-9+/]+={0,2}$') then raise exception 'Immagine non valida o troppo grande';end if;
+ if p_image is not null and (length(p_image)>1398127 or p_image !~ '^data:image/(png|webp);base64,[A-Za-z0-9+/]+={0,2}$') then raise exception 'Immagine non valida o troppo grande';end if;
  select name,image_data is not null into v_name,v_had from club_private.players where id=p_id for update;
  if not found then raise exception 'Giocatore inesistente';end if;
  update club_private.players set image_data=p_image where id=p_id;
