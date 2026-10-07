@@ -29,6 +29,7 @@ async function reload(){
  if(session.expires_at&&session.expires_at*1000<Date.now()+60000)await refreshToken();
  if(!session)return;
  const data=await rpc('club_snapshot',{p_season:season});
+ try{data.pairStats=await rpc('club_pair_statistics',{p_season:data.season})}catch{data.pairStats=null}
  if(data.players.find(p=>p.id===data.user)?.admin){try{data.adminHistory=await rpc('club_admin_history')}catch{}}
  try{const push=await rpc('club_push_config');if(push.publicKey)config.vapidPublicKey=push.publicKey}catch{}
  await syncPushState();
@@ -295,3 +296,24 @@ function rosterPlayers(){return state.players.filter(p=>p.active!==false||p.hasP
 function setPlayerActive(id,active){if(!admin())return;const x=p(id);modal(active?'Riattiva giocatore':'Disattiva giocatore',`<p>${esc(x.name)}</p><div class="notice">${active?'Il giocatore tornerà disponibile per le convocazioni. Se ha un’email associata potrà accedere nuovamente; dovrà riattivare le notifiche sul dispositivo.':'Il giocatore non potrà accedere né essere convocato. Il profilo e tutte le statistiche restano conservati. In rosa sarà visibile solo nelle stagioni con almeno una presenza. Rimuovilo prima dalle partite in programma; se è admin, rimuovi prima quel ruolo.'}</div><button class="btn" onclick="confirmPlayerActive(${id},${active})">Conferma</button>`)}
 async function confirmPlayerActive(id,active){if(await action('player_active',{id,active},active?'Giocatore riattivato':'Giocatore disattivato'))$('#modal').close()}
 if(!online)render();
+
+// Pair totals use actual appearances and the full score, never individual ballots.
+let pairPlayer='',pairMinimum=1;
+function demoPairStatistics(){
+ const totals=new Map(),ownOnly=!admin()&&!me().seeAll;
+ for(const m of state.matches){if(!m.done||m.cancelled||!m.result)continue;const score=resultScore(m),ids=[...m.a,...m.b].filter(id=>state.players.some(p=>p.id===id)&&m.result[id]?.present).sort((a,b)=>a-b);
+ for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){const first=ids[i],second=ids[j];if(ownOnly&&first!==user&&second!==user)continue;const side=m.a.includes(first),together=side===m.a.includes(second),key=first+':'+second+':'+together;let row=totals.get(key);if(!row){row={first,second,together,games:0,wins:0,draws:0,losses:0};totals.set(key,row)}row.games++;if(score[0]===score[1])row.draws++;else if(side?score[0]>score[1]:score[1]>score[0])row.wins++;else row.losses++}
+ }return {pairs:[...totals.values()],ownOnly};
+}
+function pairStatistics(){
+ const data=online?state.pairStats:demoPairStatistics();
+ const intro=heading('Statistiche delle coppie','Affinità in squadra e sfide equilibrate nella stagione selezionata.');
+ if(!data)return intro+'<div class="notice">Statistiche delle coppie non disponibili. Un admin deve completare l’aggiornamento del database.</div><button class="btn secondary" onclick="go(\'stats\')">← Statistiche</button>';
+ const filtered=data.pairs.filter(r=>r.games>=pairMinimum&&(!pairPlayer||r.first===+pairPlayer||r.second===+pairPlayer));
+ const together=filtered.filter(r=>r.together).sort((a,b)=>b.wins/b.games-a.wins/a.games||b.games-a.games||b.wins-a.wins||a.first-b.first||a.second-b.second);
+ const duels=filtered.filter(r=>!r.together).sort((a,b)=>Math.abs(a.wins-a.losses)/a.games-Math.abs(b.wins-b.losses)/b.games||b.games-a.games||a.first-b.first||a.second-b.second);
+ const cards=(rows,team)=>rows.map(r=>`<article class="card"><h3>${esc(p(r.first).name)} ${team?'&':'contro'} ${esc(p(r.second).name)}</h3><span class="badge">${r.games} ${r.games===1?'partita':'partite'}</span>${team?`<p><strong>${(100*r.wins/r.games).toFixed(1)}% di vittorie insieme</strong></p><p class="muted">${r.wins} vittorie · ${r.draws} pareggi · ${r.losses} sconfitte</p>`:`<p><strong>${r.wins} – ${r.losses}</strong> vittorie nei confronti diretti</p><p class="muted">${esc(p(r.first).name)}: ${r.wins} · ${esc(p(r.second).name)}: ${r.losses}<br>${r.draws} pareggi</p>`}</article>`).join('')||'<div class="card empty">Nessuna coppia con questi filtri.</div>';
+ return intro+`<div class="toolbar"><button class="btn secondary" onclick="go('stats')">← Statistiche</button>${data.ownOnly?'':`<select aria-label="Filtra coppie per giocatore" onchange="pairPlayer=this.value;render()"><option value="">Tutti i giocatori</option>${sortedPlayers().map(p=>`<option value="${p.id}" ${pairPlayer===String(p.id)?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`}<select aria-label="Partite minime della coppia" onchange="pairMinimum=+this.value;render()">${[1,3,5,10].map(n=>`<option value="${n}" ${pairMinimum===n?'selected':''}>Almeno ${n} ${n===1?'partita':'partite'}</option>`).join('')}</select></div>${data.ownOnly?'<div class="notice">Vedi solo le coppie e le sfide a cui hai partecipato. Le altre statistiche del gruppo restano riservate.</div>':''}<h2>Chi vince più spesso insieme</h2><p class="muted">Ordinate per percentuale di vittorie, poi per partite giocate insieme. Usa il filtro per confrontare coppie con più partite.</p><div class="grid">${cards(together,true)}</div><h2 style="margin-top:28px">Le sfide più equilibrate</h2><p class="muted">Ordinate per la differenza tra le vittorie dei due giocatori rispetto alle partite disputate, poi per numero di sfide.</p><div class="grid">${cards(duels,false)}</div><p class="muted">Contano solo partite concluse e non annullate in cui entrambi erano presenti. Le statistiche si aggiornano anche dopo una correzione del tabellino.</p>`;
+}
+pages.pairs=pairStatistics;
+const statsWithoutPairs=stats;stats=function(){return statsWithoutPairs()+`<div class="toolbar" style="margin-top:22px"><button class="btn" onclick="go('pairs')">Statistiche delle coppie →</button></div>`};pages.stats=stats;

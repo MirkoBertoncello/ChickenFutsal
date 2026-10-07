@@ -306,4 +306,14 @@ const deviceEndpoint='https://fcm.googleapis.com/device-test';await act('push_su
 const device=async(disable=false)=>(await db.query('select public.club_device_push($1,$2) x',[deviceEndpoint,disable])).rows[0].x;
 assert.equal((await device()).active,true);await as(5);assert.equal((await device()).active,false);await device(true);await as(1);assert.equal((await device()).active,true);await device(true);assert.equal((await device()).active,false);
 await as(4);await rejects(()=>device());await db.exec('reset role;set role anon');await rejects(()=>device());
+// Pair statistics respect presence, cancellation, own goals, season and server permissions.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261007_pair_statistics.sql',import.meta.url),'utf8'));
+await db.exec(`insert into club_private.seasons(id,name,started_on,closed_at) values(2099,'Pairs test','2099-01-01',now());
+insert into club_private.matches(season,match_date,match_time,field,team_a,team_b,result) values
+(2099,'2099-01-01','21:00','Test','[1,5]','[6,7]','{"1":{"goals":1,"own":0,"present":true},"5":{"goals":0,"own":0,"present":true},"6":{"goals":0,"own":1,"present":true},"7":{"goals":0,"own":0,"present":false}}'),
+(2099,'2099-01-02','21:00','Test','[1,6]','[5,7]','{"1":{"goals":0,"own":0,"present":true},"6":{"goals":0,"own":0,"present":true},"5":{"goals":0,"own":0,"present":true},"7":{"goals":0,"own":0,"present":true}}');`);
+await as(1);const pairSnapshot=async()=>(await db.query('select public.club_pair_statistics(2099) x')).rows[0].x;let pairs=await pairSnapshot();assert.equal(pairs.ownOnly,false);let allied=pairs.pairs.find(r=>r.first===1&&r.second===5&&r.together);assert.deepEqual(allied,{first:1,second:5,together:true,games:1,wins:1,draws:0,losses:0});assert.ok(!pairs.pairs.some(r=>r.first===6&&r.second===7&&r.together));
+await as(5);pairs=await pairSnapshot();assert.equal(pairs.ownOnly,true);assert.ok(pairs.pairs.every(r=>r.first===5||r.second===5));assert.ok(pairs.pairs.some(r=>!r.together&&r.draws===1));
+await as(1);await act('permission',{id:5,key:'seeAll',value:true});await as(5);assert.equal((await pairSnapshot()).ownOnly,false);await as(1);await act('permission',{id:5,key:'seeAll',value:false});
+await db.exec("reset role;update club_private.matches set cancelled_at=now() where season=2099 and match_date='2099-01-01'");await as(1);assert.ok(!(await pairSnapshot()).pairs.some(r=>r.together&&r.first===1&&r.second===5));await rejects(()=>db.query('select public.club_pair_statistics(-1)'));await as(4);await rejects(()=>pairSnapshot());await db.exec('reset role;set role anon');await rejects(()=>pairSnapshot());
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');

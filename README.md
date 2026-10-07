@@ -281,3 +281,9 @@ Per installazioni esistenti eseguire `supabase/migrations/20261007_device_push.s
 ### Organizzazione delle partite
 
 Il primo passaggio mostra OVR e ruolo accanto a ogni giocatore. In modalità manuale si assegnano direttamente NERI e BIANCHI: una squadra piena non accetta un sesto giocatore, e liberare un posto la rende nuovamente selezionabile. L’anteprima e la schermata di scambio consentono di tornare al passaggio precedente; data, ora, campo, convocati e scambi rimangono nella bozza finché non si conferma o si avvia una nuova partita.
+
+### Statistiche delle coppie
+
+Da Statistiche → Statistiche delle coppie si vedono i risultati della stagione selezionata quando due giocatori sono compagni o avversari. Contano solo partite concluse, non annullate, in cui entrambi sono segnati presenti. Il punteggio include gli autogol. Le coppie sono ordinate per percentuale di vittorie insieme; i confronti diretti per differenza assoluta tra le vittorie divisa per le partite. A parità precedono le coppie con più incontri. Il filtro minimo (1, 3, 5, 10) aiuta a distinguere un singolo incontro da una tendenza.
+
+Gli admin e i membri autorizzati alle statistiche globali possono vedere e filtrare tutte le coppie. Gli altri ricevono dal server solamente le coppie che li comprendono: i risultati sono relativi alle proprie partite, senza esporre coppie di altri giocatori. I giocatori disattivati rimangono inclusi per le presenze storiche; quelli eliminati completamente sono esclusi fino al recupero. Le correzioni ai tabellini aggiornano i conteggi al successivo aggiornamento della pagina. Per installazioni esistenti eseguire `supabase/migrations/20261007_pair_statistics.sql` nel SQL Editor. La pagina mostra un messaggio di aggiornamento necessario se la funzione non è disponibile.
