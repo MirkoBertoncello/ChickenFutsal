@@ -1,9 +1,9 @@
 const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
-function harness(online=false){
+function harness(online=false,mem={},tab={}){
  let identityRemoved=false;const nodes={};const n=id=>nodes[id]??={value:'',checked:false,innerHTML:'',disabled:false,insertAdjacentHTML(where,s){this.innerHTML=s+this.innerHTML},addEventListener(){},close(){},showModal(){},textContent:'',checkValidity(){return true}};
  const identity=n('.identity');let identityHTML='';Object.defineProperty(identity,'innerHTML',{get(){return identityHTML},set(value){identityHTML=value;identityRemoved=!value.includes('id="identity"')}});
- const mem={};let calls=[];
- const c={console,structuredClone,localStorage:{getItem(k){return mem[k]||null},setItem(k,v){mem[k]=v}},sessionStorage:{getItem(){return null},setItem(){},removeItem(){}},document:{querySelector:id=>id==='#identity'&&identityRemoved?null:n(id),querySelectorAll(){return[]}},window:{CLUB_CONFIG:online?{supabaseUrl:'https://test.supabase.co',supabasePublishableKey:'public-test-key'}:{},scrollTo(){}},navigator:{},location:{protocol:'https:',origin:'https://club.pages.dev',pathname:'/',hash:'',search:''},history:{replaceState(){}},setTimeout(){},clearTimeout(){},Date,Blob,URL,URLSearchParams,Uint8Array,atob,fetch:async(url,args)=>{calls.push({url,args});return {ok:true,json:async()=>({})}}};
+ let calls=[];
+ const c={console,structuredClone,localStorage:{getItem(k){return mem[k]||null},setItem(k,v){mem[k]=v},removeItem(k){delete mem[k]}},sessionStorage:{getItem(k){return tab[k]||null},setItem(k,v){tab[k]=v},removeItem(k){delete tab[k]}},document:{querySelector:id=>id==='#identity'&&identityRemoved?null:n(id),querySelectorAll(){return[]}},window:{CLUB_CONFIG:online?{supabaseUrl:'https://test.supabase.co',supabasePublishableKey:'public-test-key'}:{},scrollTo(){}},navigator:{},location:{protocol:'https:',origin:'https://club.pages.dev',pathname:'/',hash:'',search:''},history:{replaceState(){}},setTimeout(){},clearTimeout(){},Date,Blob,URL,URLSearchParams,Uint8Array,atob,fetch:async(url,args)=>{calls.push({url,args});return {ok:true,json:async()=>({})}}};
  vm.createContext(c);const html=fs.readFileSync(new URL('../web/index.html',`file://${__filename}`),'utf8');vm.runInContext(html.split('<script>')[1].split('</script>')[0],c);vm.runInContext(fs.readFileSync(new URL('../web/cloud.js',`file://${__filename}`),'utf8'),c);return {c,n,calls};
 }
 (async()=>{
@@ -67,5 +67,16 @@ function harness(online=false){
  assert.ok(online.n('.identity').innerHTML.includes('Admin'));
  await vm.runInContext('reload()',online.c);
  assert.ok(online.n('#app').innerHTML.includes('Ci vediamo in campo'));
+ const saved={},tab={};const remember=harness(false,saved,tab);
+ remember.n('#auth-remember').checked=true;vm.runInContext("chooseRemember();storeSession({access_token:'saved',refresh_token:'refresh',expires_in:3600})",remember.c);assert.ok(saved['club-session']);assert.equal(tab['club-session'],undefined);
+ const reopened=harness(false,saved,{});assert.equal(vm.runInContext('session.access_token',reopened.c),'saved');
+ vm.runInContext('storeSession(null)',reopened.c);assert.equal(saved['club-session'],undefined);
+ remember.n('#auth-remember').checked=false;vm.runInContext("chooseRemember();storeSession({access_token:'temporary',expires_in:3600})",remember.c);assert.ok(tab['club-session']);assert.equal(saved['club-session'],undefined);assert.equal(vm.runInContext('session',harness(false,saved,{}).c),null);
+ let subscribed=true,registered=true;const push=harness(true);push.c.window.PushManager=function(){};push.c.Notification={permission:'granted',requestPermission:async()=> 'granted'};const sub={endpoint:'https://fcm.googleapis.com/test',toJSON(){return {endpoint:this.endpoint}},async unsubscribe(){subscribed=false;return true}};const reg={active:true,pushManager:{getSubscription:async()=>subscribed?sub:null,subscribe:async()=>{subscribed=true;return sub}}};push.c.navigator.serviceWorker={getRegistration:async()=>reg,register:async()=>reg};
+ push.c.fetch=async(url,args)=>{const body=JSON.parse(args.body);if(url.endsWith('club_device_push')){if(body.p_disable)registered=false;return {ok:true,json:async()=>({active:registered})}}if(url.endsWith('club_action'))registered=true;return {ok:true,json:async()=> url.endsWith('club_snapshot')?snapshot:{publicKey:'AA'}}};
+ await vm.runInContext("session={access_token:'test'};reload()",push.c);assert.ok(push.n('#app').innerHTML.includes('Disattiva notifiche'));
+ await vm.runInContext('togglePush()',push.c);assert.equal(subscribed,false);assert.equal(registered,false);assert.ok(push.n('#app').innerHTML.includes('Attiva notifiche'));
+ await vm.runInContext('togglePush()',push.c);assert.equal(subscribed,true);assert.equal(registered,true);assert.ok(push.n('#app').innerHTML.includes('Disattiva notifiche'));
+ registered=false;await vm.runInContext('reload()',push.c);assert.ok(push.n('#app').innerHTML.includes('Attiva notifiche'));
  console.log('PASS frontend: all screens, own statistics, demo secret voting, self vote, round reset, eliminated voters, winners, result corrections, online login gate and authenticated RPC');
 })().catch(e=>{console.error(e);process.exit(1)});

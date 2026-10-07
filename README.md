@@ -271,3 +271,9 @@ Da questa migrazione i giocatori eliminati vengono archiviati privatamente e pos
 
 ### Disattivazione reversibile
 Eseguire `supabase/migrations/20261007_player_activation.sql`. Gli admin possono disattivare e riattivare dal profilo e da Gestione. Il profilo, email, permessi e voti vengono mantenuti; l’accesso al gruppo è negato lato server e le notifiche push vengono disattivate. Un disattivato compare in rosa solo con almeno una presenza nella stagione selezionata. A chi non vede le statistiche il server restituisce soltanto il flag di presenza, non il conteggio. Gestione mantiene l’elenco completo per consentire la riattivazione. Le nuove convocazioni escludono gli inattivi, mentre i tabellini storici restano correggibili. Prima della disattivazione rimuovere il giocatore dalle partite pendenti e, se presente, il ruolo admin. Dopo la riattivazione l’account associato può accedere nuovamente e deve riabilitare le notifiche sul dispositivo.
+
+### Accesso persistente e pulsante notifiche
+
+Nella schermata di accesso, “Ricordami su questo dispositivo” è facoltativo: salva la sessione in localStorage e ne rinnova i token alla riapertura; senza selezione si usa sessionStorage. “Esci” cancella entrambe le memorie di sessione. La durata effettiva resta soggetta alle impostazioni e alla validità della sessione Supabase; cancellare i dati del browser richiede un nuovo accesso.
+
+Per installazioni esistenti eseguire `supabase/migrations/20261007_device_push.sql` nel SQL Editor di Supabase. Il pulsante indica “Disattiva notifiche” solo se la sottoscrizione del browser, il consenso e la registrazione del membro sul server risultano attivi. La disattivazione rimuove la sola registrazione di questo dispositivo e la sottoscrizione del browser, lasciando gli altri dispositivi e gli avvisi nel sito disponibili. Il consenso del browser può rimanere concesso per una futura riattivazione. Senza la migrazione il controllo dello stato non è disponibile.

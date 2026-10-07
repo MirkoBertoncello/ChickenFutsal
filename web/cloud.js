@@ -4,7 +4,9 @@ const config=window.CLUB_CONFIG||{},online=!!(config.supabaseUrl&&config.supabas
 let season=null,session=null,busy=false,cloudReady=false;
 const originalRender=render;
 let tokenRefresh=null;
-try{session=JSON.parse(sessionStorage.getItem('club-session')||'null')}catch{}
+let rememberDevice=false,pushActive=false,pushBusy=false;
+try{rememberDevice=localStorage.getItem('club-remember')==='true';session=JSON.parse((rememberDevice?localStorage:sessionStorage).getItem('club-session')||'null')}catch{}
+function chooseRemember(){rememberDevice=!!$('#auth-remember')?.checked;localStorage.setItem('club-remember',String(rememberDevice));localStorage.removeItem('club-session');sessionStorage.removeItem('club-session')}
 const apiBase=String(config.supabaseUrl||'').replace(/\/$/,'');
 async function request(path,body,token=true){
  const headers={'apikey':config.supabasePublishableKey,'Content-Type':'application/json'};
@@ -14,7 +16,11 @@ async function request(path,body,token=true){
  if(!res.ok)throw Error(data.message||data.msg||data.error_description||data.error||'Richiesta non riuscita');
  return data;
 }
-function storeSession(s){session=s;if(s){sessionStorage.setItem('club-session',JSON.stringify(s));clearTimeout(tokenRefresh);tokenRefresh=setTimeout(()=>refreshToken(),Math.max(1000,(s.expires_in||3600)*1000-60000))}else{sessionStorage.removeItem('club-session');clearTimeout(tokenRefresh)}}
+function storeSession(s){
+ session=s;clearTimeout(tokenRefresh);
+ if(s){s.expires_at??=Math.floor(Date.now()/1000)+(s.expires_in||3600);const storage=rememberDevice?localStorage:sessionStorage;storage.setItem('club-session',JSON.stringify(s));(rememberDevice?sessionStorage:localStorage).removeItem('club-session');tokenRefresh=setTimeout(()=>refreshToken(),Math.max(1000,s.expires_at*1000-Date.now()-60000))}
+ else{localStorage.removeItem('club-session');sessionStorage.removeItem('club-session');pushActive=false}
+}
 async function refreshToken(){if(!session?.refresh_token)return;try{storeSession(await request('/auth/v1/token?grant_type=refresh_token',{refresh_token:session.refresh_token},false))}catch{storeSession(null);loginView('Sessione scaduta. Accedi di nuovo.')}}
 async function rpc(name,body={}){return request('/rest/v1/rpc/'+name,body)}
 async function reload(){
@@ -25,19 +31,20 @@ async function reload(){
  const data=await rpc('club_snapshot',{p_season:season});
  if(data.players.find(p=>p.id===data.user)?.admin){try{data.adminHistory=await rpc('club_admin_history')}catch{}}
  try{const push=await rpc('club_push_config');if(push.publicKey)config.vapidPublicKey=push.publicKey}catch{}
+ await syncPushState();
  season=data.season;state={...data,votes:{},voteOpen:false};user=data.user;cloudReady=true;render();
 }
 function loginView(message=''){
  cloudReady=false;$('#nav').innerHTML='';$('.identity').innerHTML='<span class="badge">Accesso al gruppo</span>';
- $('#app').innerHTML=heading('Il nostro calcetto, insieme.','Accedi con l’email che l’admin ha associato al tuo giocatore.')+`<div class="card" style="max-width:480px"><h2>Entra nel ChickenFutsal</h2>${config.googleOAuthEnabled?'<p><button class="btn secondary" onclick="googleLogin()">Accedi con Google</button></p>':''}${message?`<div class="notice">${esc(message)}</div>`:''}${config.googleOAuthEnabled?'':`<form onsubmit="authenticate(event)"><div class="field"><label for="auth-email">Email</label><input id="auth-email" type="email" autocomplete="email" required></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" minlength="8" required></div><div class="toolbar"><button class="btn" id="auth-button">Accedi</button><button type="button" class="btn secondary" onclick="authenticate(null,true)">Crea account</button></div><button type="button" class="link" onclick="resetPassword()">Password dimenticata?</button></form>`}<p class="muted">Usa l’account con l’email che l’admin ha associato al tuo giocatore. Un account da solo non dà accesso al gruppo.</p></div>`;
+ $('#app').innerHTML=heading('Il nostro calcetto, insieme.','Accedi con l’email che l’admin ha associato al tuo giocatore.')+`<div class="card" style="max-width:480px"><h2>Entra nel ChickenFutsal</h2><label class="check"><input id="auth-remember" type="checkbox" ${rememberDevice?'checked':''}>Ricordami su questo dispositivo</label>${config.googleOAuthEnabled?'<p><button class="btn secondary" onclick="googleLogin()">Accedi con Google</button></p>':''}${message?`<div class="notice">${esc(message)}</div>`:''}${config.googleOAuthEnabled?'':`<form onsubmit="authenticate(event)"><div class="field"><label for="auth-email">Email</label><input id="auth-email" type="email" autocomplete="email" required></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" minlength="8" required></div><div class="toolbar"><button class="btn" id="auth-button">Accedi</button><button type="button" class="btn secondary" onclick="authenticate(null,true)">Crea account</button></div><button type="button" class="link" onclick="resetPassword()">Password dimenticata?</button></form>`}<p class="muted">Usa l’account con l’email che l’admin ha associato al tuo giocatore. Un account da solo non dà accesso al gruppo.</p></div>`;
  $('footer').textContent='ChickenFutsal · Dati condivisi su Supabase · Accesso riservato ai membri';
 }
-function googleLogin(){location.assign(apiBase+'/auth/v1/authorize?provider=google&redirect_to='+encodeURIComponent(location.origin+'/'))}
+function googleLogin(){chooseRemember();location.assign(apiBase+'/auth/v1/authorize?provider=google&redirect_to='+encodeURIComponent(location.origin+'/'))}
 async function authenticate(e,signup=false){
  e?.preventDefault();if(busy)return;
  const email=$('#auth-email').value.trim(),password=$('#auth-password').value;
  if(!$('#auth-email').checkValidity()||password.length<8){toast('Inserisci email valida e password di almeno 8 caratteri');return}
- busy=true;$('#auth-button').disabled=true;
+ chooseRemember();busy=true;$('#auth-button').disabled=true;
  try{
   const data=await request(signup?'/auth/v1/signup':'/auth/v1/token?grant_type=password',{email,password,...(signup?{data:{}}:{})},false);
   if(data.access_token){storeSession(data);await reload()}else loginView('Controlla la tua email e conferma l’account, poi accedi.');
@@ -68,7 +75,7 @@ render=function(){
  }else $('footer').textContent='Modalità demo · Solo dati locali · Account e notifiche simulati';
  const options=state.seasonOptions||[{id:season||2026,name:String(season||2026)}];
  $('.top small').textContent=`Stagione ${seasonName()} · Il nostro gruppo`;
- $('#app').insertAdjacentHTML('afterbegin',`<div class="toolbar" style="margin-top:20px;margin-bottom:0"><select aria-label="Stagione" onchange="changeSeason(this.value)">${options.map(y=>`<option value="${y.id}" ${y.id===season?'selected':''}>${esc(y.name)}${y.closed_at?' · chiusa':' · attiva'}</option>`).join('')}</select><button class="btn small secondary" onclick="refreshView()">↻ Aggiorna</button><button class="btn small secondary" onclick="showNotifications()">♧ Avvisi ${state.notifications.filter(n=>!n.seen).length||''}</button>${admin()?'<button class="btn small" onclick="startSeason()">Inizia nuova stagione</button>':''}${online?'<button class="btn small secondary" onclick="enablePush()">Attiva notifiche</button>':'<span class="badge">Demo locale</span>'}</div>${state.seasonInfo?.closed_at?'<div class="notice">Stagione chiusa · storico in sola lettura.</div>':''}`);
+ $('#app').insertAdjacentHTML('afterbegin',`<div class="toolbar" style="margin-top:20px;margin-bottom:0"><select aria-label="Stagione" onchange="changeSeason(this.value)">${options.map(y=>`<option value="${y.id}" ${y.id===season?'selected':''}>${esc(y.name)}${y.closed_at?' · chiusa':' · attiva'}</option>`).join('')}</select><button class="btn small secondary" onclick="refreshView()">↻ Aggiorna</button><button class="btn small secondary" onclick="showNotifications()">♧ Avvisi ${state.notifications.filter(n=>!n.seen).length||''}</button>${admin()?'<button class="btn small" onclick="startSeason()">Inizia nuova stagione</button>':''}${online?'<button id="push-toggle" class="btn small secondary" onclick="togglePush()">'+(pushActive?'Disattiva notifiche':'Attiva notifiche')+'</button>':'<span class="badge">Demo locale</span>'}</div>${state.seasonInfo?.closed_at?'<div class="notice">Stagione chiusa · storico in sola lettura.</div>':''}`);
  $('.sidebar-bottom').innerHTML=`IL NOSTRO CAMPIONATO<br><b style="color:white">Stagione ${seasonName()}</b><br><br>Il giovedì non si prendono impegni.`;
 };
 async function changeSeason(value){if(!online)storeDemoTotals();season=+value;try{await reload()}catch(e){toast(e.message)}}
@@ -145,6 +152,23 @@ function invitePlayer(id){modal('Accesso · '+esc(p(id).name),`<form onsubmit="s
 async function saveInvite(e,id){e.preventDefault();if(await action('invite',{id,email:$('#invite-email').value.trim()},'Email associata'))$('#modal').close()}
 function showNotifications(){let ns=online?state.notifications:state.notifications.filter(n=>n.to.includes(user));modal('I tuoi avvisi',ns.map(n=>`<div class="leader"><p>${esc(n.text)}</p><div class="toolbar">${n.matchId?`<button class="btn small secondary" onclick="showMatch(${n.matchId})">Vedi partita</button>`:''}${!n.seen?`<button class="btn small secondary" onclick="markSeen(${n.id})">Segna come letto</button>`:'<span class="badge">Letto</span>'}</div></div>`).join('')||'<p class="muted">Nessun avviso per te.</p>')}
 async function markSeen(id){if(await action('seen',{id}))showNotifications()}
+async function deviceSubscription(){
+ if(!('serviceWorker' in navigator)||!('PushManager' in window))return null;
+ const reg=await navigator.serviceWorker.getRegistration('/');return reg?await reg.pushManager.getSubscription():null;
+}
+async function syncPushState(){
+ pushActive=false;
+ try{const sub=await deviceSubscription();if(sub&&Notification.permission==='granted'){const status=await rpc('club_device_push',{p_endpoint:sub.endpoint});pushActive=status.active===true}}catch{}
+}
+async function togglePush(){
+ if(pushBusy)return;pushBusy=true;const button=$('#push-toggle');if(button)button.disabled=true;
+ try{await syncPushState();if(pushActive)await disablePush();else await enablePush()}finally{pushBusy=false;if($('#push-toggle'))$('#push-toggle').disabled=false}
+}
+async function disablePush(){
+ try{const sub=await deviceSubscription();if(sub){await rpc('club_device_push',{p_endpoint:sub.endpoint,p_disable:true});if(!await sub.unsubscribe())throw Error('Registrazione rimossa dal sito. Riprova per disattivarla anche nel browser.')}
+ await syncPushState();render();toast('Notifiche disattivate su questo dispositivo');
+ }catch(e){await syncPushState();render();toast(e.message)}
+}
 async function enablePush(){
  if(!online)return toast('Le notifiche push richiedono l’accesso al sito condiviso');
  if(!config.vapidPublicKey){try{const push=await rpc('club_push_config');config.vapidPublicKey=push.publicKey||''}catch{}}
@@ -156,7 +180,7 @@ async function enablePush(){
   const reg=registration.active?registration:await navigator.serviceWorker.ready;
   const raw=atob(config.vapidPublicKey.replace(/-/g,'+').replace(/_/g,'/'));const key=Uint8Array.from(raw,c=>c.charCodeAt(0));
   const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-  await action('push_subscribe',{subscription:sub.toJSON()},'Notifiche attivate su questo dispositivo');
+  if(await action('push_subscribe',{subscription:sub.toJSON()},'Notifiche attivate su questo dispositivo')){await syncPushState();render()}
  }catch(e){toast(e.message)}
 }
 async function boot(){

@@ -300,4 +300,10 @@ await rejects(()=>act('permission',{id:4,key:'admin',value:true}));await rejects
 await act('player_active',{id:4,active:true});await as(4);assert.equal((await db.query('select public.club_snapshot(null) x')).rows[0].x.user,4);await as(1);
 const scheduledWithFour=await act('match',{season:reminderSeason,date:'2030-05-01',time:'21:00',field:'Test',a:reminderA,b:reminderB});await rejects(()=>act('player_active',{id:4,active:false}));await act('match_cancel',{id:scheduledWithFour.id});await act('player_active',{id:4,active:false});
 assert.equal((await db.query('select public.club_admin_history() x')).rows[0].x.changes[0].action,'player_active');
+// Device endpoints cannot reveal or remove another member's subscriptions.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261007_device_push.sql',import.meta.url),'utf8'));await as(1);
+const deviceEndpoint='https://fcm.googleapis.com/device-test';await act('push_subscribe',{subscription:{endpoint:deviceEndpoint,keys:{auth:'test',p256dh:'test'}}});
+const device=async(disable=false)=>(await db.query('select public.club_device_push($1,$2) x',[deviceEndpoint,disable])).rows[0].x;
+assert.equal((await device()).active,true);await as(5);assert.equal((await device()).active,false);await device(true);await as(1);assert.equal((await device()).active,true);await device(true);assert.equal((await device()).active,false);
+await as(4);await rejects(()=>device());await db.exec('reset role;set role anon');await rejects(()=>device());
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
