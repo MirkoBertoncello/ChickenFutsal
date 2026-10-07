@@ -255,7 +255,7 @@ begin
  v_actor:=club_private.actor();
  if not exists(select 1 from club_private.members where player_id=v_actor and is_admin) then raise exception 'Operazione riservata agli admin'; end if;
  return jsonb_build_object(
- 'changes',(select coalesce(jsonb_agg(to_jsonb(a) order by a.id desc),'[]'::jsonb) from (select a.id,a.created_at,coalesce(a.actor_name,p.name,'Admin #'||a.actor::text) actor_name,a.action,a.subject,a.details from club_private.audit a left join club_private.players p on p.id=a.actor order by a.id desc limit 200) a),
+ 'changes',(select coalesce(jsonb_agg(to_jsonb(a) order by a.id desc),'[]'::jsonb) from (select a.id,a.created_at,coalesce(a.actor_name,p.name,'Admin #'||a.actor::text) actor_name,a.action,a.subject,a.details from club_private.audit a left join club_private.players p on p.id=a.actor order by a.id desc limit 10) a),
  'deletedPlayers',(select coalesce(jsonb_agg(jsonb_build_object('id',player_id,'name',profile->>'name','role',profile->>'role','deletedAt',deleted_at,'deletedBy',deleted_by_name) order by deleted_at desc),'[]'::jsonb) from club_private.deleted_players));
 end $$;
 revoke all on function public.club_admin_history() from public,anon;
@@ -263,6 +263,7 @@ grant execute on function public.club_admin_history() to authenticated;
 
 -- Avatar raster compatti, privati e accessibili solo ai membri del gruppo.
 alter table club_private.players add column if not exists image_data text;
+alter table club_private.players add column if not exists image_version text generated always as (case when image_data is not null then md5(image_data) else null end) stored;
 create or replace function public.club_snapshot(p_season integer default null) returns jsonb
 language plpgsql security definer set search_path='' as $$
 declare v_actor bigint; v_admin boolean; v_all boolean; v_players jsonb; v_matches jsonb; v_rounds jsonb; v_awards jsonb;
@@ -272,7 +273,7 @@ begin
  if not exists(select 1 from club_private.seasons where id=p_season) then raise exception 'Stagione non valida'; end if;
  select is_admin,see_all into v_admin,v_all from club_private.members where player_id=v_actor;
  select coalesce(jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'role',p.role,
- 'image',p.image_data,'occasional',p.occasional,'active',p.active,'hasPresence',coalesce(s.apps,0)>0,'admin',coalesce(m.is_admin,false),'seeAll',case when v_admin or p.id=v_actor then coalesce(m.see_all,false) else false end)
+ 'imageVersion',p.image_version,'occasional',p.occasional,'active',p.active,'hasPresence',coalesce(s.apps,0)>0,'admin',coalesce(m.is_admin,false),'seeAll',case when v_admin or p.id=v_actor then coalesce(m.see_all,false) else false end)
  || case when v_admin or v_all or p.id=v_actor then jsonb_build_object('ratings',p.ratings,
  'goals',coalesce(s.goals,0),'own',coalesce(s.own,0),'apps',coalesce(s.apps,0),
  'wins',coalesce(s.wins,0),'draws',coalesce(s.draws,0),'losses',coalesce(s.losses,0),
@@ -743,3 +744,16 @@ begin
 end $$;
 revoke all on function public.club_player_image(bigint,text) from public,anon;
 grant execute on function public.club_player_image(bigint,text) to authenticated;
+
+-- Images are fetched separately in small batches after membership validation.
+create or replace function public.club_player_images(p_ids bigint[]) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare v_actor bigint:=club_private.actor();v_result jsonb;
+begin
+ if coalesce(cardinality(p_ids),0)>10 then raise exception 'Richiedi al massimo dieci immagini';end if;
+ select coalesce(jsonb_agg(jsonb_build_object('id',p.id,'version',p.image_version,'image',p.image_data)),'[]'::jsonb)
+ into v_result from club_private.players p where p.id=any(p_ids) and p.image_data is not null;
+ return v_result;
+end $$;
+revoke all on function public.club_player_images(bigint[]) from public,anon;
+grant execute on function public.club_player_images(bigint[]) to authenticated;

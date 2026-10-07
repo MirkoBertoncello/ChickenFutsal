@@ -15,15 +15,17 @@ select cron.schedule(
  'chicken-futsal-send-push',
  '*/5 * * * *',
  $job$
- select net.http_post(
-  url:=(select decrypted_secret from vault.decrypted_secrets where name='club_project_url')||'/functions/v1/send-push',
-  headers:=jsonb_build_object(
-   'Content-Type','application/json',
-   'apikey',(select decrypted_secret from vault.decrypted_secrets where name='club_publishable_key'),
-   'Authorization','Bearer '||(select decrypted_secret from vault.decrypted_secrets where name='club_cron_secret')
-  ),
-  body:='{}'::jsonb,
-  timeout_milliseconds:=120000
- );
- $job$
+select club_private.enqueue_reminders();
+-- Gli avvisi senza dispositivi restano nel sito senza avviare un invio push.
+update club_private.push_queue q set status='sent',claim_token=null
+where q.status='pending' and not exists(select 1 from club_private.push_subscriptions s where s.player_id=q.player_id);
+select net.http_post(
+ url:=(select decrypted_secret from vault.decrypted_secrets where name='club_project_url')||'/functions/v1/send-push',
+ headers:=jsonb_build_object('Content-Type','application/json',
+ 'apikey',(select decrypted_secret from vault.decrypted_secrets where name='club_publishable_key'),
+ 'Authorization','Bearer '||(select decrypted_secret from vault.decrypted_secrets where name='club_cron_secret')),
+ body:='{}'::jsonb,timeout_milliseconds:=120000)
+where exists(select 1 from club_private.push_queue q where q.attempts<3 and
+ (q.status='pending' or (q.status in ('processing','failed') and q.claimed_at<now()-interval '10 minutes')));
+$job$
 );

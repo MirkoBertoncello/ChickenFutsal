@@ -29,9 +29,9 @@ async function reload(){
  if(session.expires_at&&session.expires_at*1000<Date.now()+60000)await refreshToken();
  if(!session)return;
  const data=await rpc('club_snapshot',{p_season:season});
- try{data.pairStats=await rpc('club_pair_statistics',{p_season:data.season})}catch{data.pairStats=null}
- if(data.players.find(p=>p.id===data.user)?.admin){try{data.adminHistory=await rpc('club_admin_history')}catch{}}
- try{const push=await rpc('club_push_config');if(push.publicKey)config.vapidPublicKey=push.publicKey}catch{}
+ await hydratePlayerImages(data);
+ await loadPageExtras(data);
+ if(!config.vapidPublicKey)try{const push=await rpc('club_push_config');if(push.publicKey)config.vapidPublicKey=push.publicKey}catch{}
  await syncPushState();
  season=data.season;state={...data,votes:{},voteOpen:false};user=data.user;cloudReady=true;render();
 }
@@ -57,7 +57,7 @@ async function resetPassword(){
 }
 async function signout(){
  if(session){try{await request('/auth/v1/logout',{})}catch{}}
- storeSession(null);state=structuredClone(seed);user=0;cloudReady=false;loginView();
+ await clearPlayerImageCache();storeSession(null);state=structuredClone(seed);user=0;cloudReady=false;loginView();
 }
 function recoveryView(){
  $('#app').innerHTML=heading('Scegli una nuova password','Salva la nuova password per il tuo account.')+`<form class="card" style="max-width:480px" onsubmit="updatePassword(event)"><div class="field"><label for="recovery-password">Nuova password</label><input id="recovery-password" type="password" minlength="8" autocomplete="new-password" required></div><button class="btn">Salva password</button></form>`;
@@ -80,7 +80,7 @@ render=function(){
  $('.sidebar-bottom').innerHTML=`IL NOSTRO CAMPIONATO<br><b style="color:white">Stagione ${seasonName()}</b><br><br>Il giovedì non si prendono impegni.`;
 };
 async function changeSeason(value){if(!online)storeDemoTotals();season=+value;try{await reload()}catch(e){toast(e.message)}}
-async function refreshView(){try{await reload();toast(online?'Dati aggiornati dal server':'Demo aggiornata')}catch(e){toast(e.message)}}
+async function refreshView(){if(refreshInFlight)return;refreshInFlight=true;try{await reload();toast(online?'Dati aggiornati dal server':'Demo aggiornata')}catch(e){toast(e.message)}finally{refreshInFlight=false}}
 async function action(name,data,success){
  if(busy)return false;busy=true;
  try{
@@ -332,3 +332,33 @@ async function preparePlayerImage(input){
 }
 async function savePlayerImage(e,id){e.preventDefault();if(!admin()||!playerImageDraft)return;if(await action('player_image',{id,image:playerImageDraft},'Immagine salvata'))profile(id)}
 async function removePlayerImage(id){if(!admin())return;if(await action('player_image',{id,image:null},'Immagine rimossa'))profile(id)}
+
+// Only avatars are cached; authenticated snapshots and statistics are always fetched live.
+let refreshInFlight=false,imageCacheDB=null;
+const imageMemory=new Map();
+async function openImageCache(){
+ if(!('indexedDB' in window))return null;
+ if(!imageCacheDB)imageCacheDB=new Promise(resolve=>{const req=window.indexedDB.open('chicken-futsal-avatars',1);req.onupgradeneeded=()=>req.result.createObjectStore('images');req.onsuccess=()=>resolve(req.result);req.onerror=()=>resolve(null);req.onblocked=()=>resolve(null)});
+ return imageCacheDB;
+}
+async function imageCacheGet(key){
+ if(imageMemory.has(key))return imageMemory.get(key);
+ const db=await openImageCache();if(!db)return null;
+ return new Promise(resolve=>{try{const req=db.transaction('images').objectStore('images').get(key);req.onsuccess=()=>{if(req.result)imageMemory.set(key,req.result);resolve(req.result||null)};req.onerror=()=>resolve(null)}catch{resolve(null)}});
+}
+async function imageCachePut(key,value){imageMemory.set(key,value);const db=await openImageCache();if(db)try{const tx=db.transaction('images','readwrite');tx.objectStore('images').put(value,key)}catch{}}
+async function clearPlayerImageCache(){imageMemory.clear();const db=await openImageCache();if(db)await new Promise(resolve=>{try{const tx=db.transaction('images','readwrite');tx.objectStore('images').clear();tx.oncomplete=resolve;tx.onerror=resolve;tx.onabort=resolve}catch{resolve()}})}
+async function hydratePlayerImages(data){
+ const missing=[],namespace=apiBase+':'+data.user+':';
+ for(const player of data.players){if(!player.imageVersion)continue;const cached=await imageCacheGet(namespace+player.id);if(cached?.version===player.imageVersion)player.image=cached.image;else missing.push(player)}
+ for(let i=0;i<missing.length;i+=10){try{const images=await rpc('club_player_images',{p_ids:missing.slice(i,i+10).map(p=>p.id)});for(const item of images){const player=data.players.find(p=>p.id===item.id);if(player&&item.version===player.imageVersion){player.image=item.image;await imageCachePut(namespace+item.id,item)}}}catch{}}
+ // Discard deleted players and obsolete account images from persistent storage.
+ const valid=new Set(data.players.filter(p=>p.imageVersion).map(p=>namespace+p.id));for(const key of imageMemory.keys())if(!valid.has(key))imageMemory.delete(key);
+ const db=await openImageCache();if(db)try{const req=db.transaction('images','readwrite').objectStore('images').openCursor();req.onsuccess=()=>{const cursor=req.result;if(cursor){if(!valid.has(cursor.key))cursor.delete();cursor.continue()}}}catch{}
+}
+async function loadPageExtras(data){
+ if(page==='pairs'&&!('pairStats' in data))try{data.pairStats=await rpc('club_pair_statistics',{p_season:data.season})}catch{data.pairStats=null}
+ if(page==='settings'&&!data.adminHistory&&data.players.find(p=>p.id===data.user)?.admin)try{data.adminHistory=await rpc('club_admin_history')}catch{}
+}
+const goWithoutExtras=go;
+go=async function(id){if(!online){goWithoutExtras(id);return}page=id;search='';if(!cloudReady)return;const current=state;await loadPageExtras(current);if(state===current&&page===id){render();window.scrollTo(0,0)}};
