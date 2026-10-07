@@ -279,4 +279,13 @@ const summaryAdmin=await snapshot(2027);const summaryGame=summaryAdmin.matches.f
 await as(4);let summaryPrivate=await snapshot(2027);assert.deepEqual(Object.keys(summaryPrivate.matches.find(m=>m.id===summaryGame.id).result),['4']);
 await as(1);await act('permission',{id:4,key:'seeAll',value:true});await as(4);assert.equal(Object.keys((await snapshot(2027)).matches.find(m=>m.id===summaryGame.id).result).length,10);
 await as(1);await act('permission',{id:4,key:'seeAll',value:false});
+// Detailed history is admin-only and never logs secret vote choices; restoration keeps IDs/statistics.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261007_history_and_player_recovery.sql',import.meta.url),'utf8'));await as(1);
+await act('ratings',{id:4,ratings:[71,72,73,74,75,76]});let history=(await db.query('select public.club_admin_history() x')).rows[0].x;const ratingChange=history.changes.find(a=>a.action==='ratings');assert.equal(ratingChange.actor_name,'Player 1');assert.deepEqual(ratingChange.details.after.ratings,[71,72,73,74,75,76]);assert.ok(ratingChange.details.before.ratings);
+await as(4);await rejects(()=>db.query('select public.club_admin_history()'));await rejects(()=>act('player_restore',{id:4}));await as(1);
+const beforeRemoval=(await db.query('select public.club_snapshot(null) x')).rows[0].x.players.find(p=>p.id===4);await act('player_delete',{id:4});history=(await db.query('select public.club_admin_history() x')).rows[0].x;assert.ok(history.deletedPlayers.some(p=>p.id===4));
+await act('player_restore',{id:4});const recovered=(await db.query('select public.club_snapshot(null) x')).rows[0].x.players.find(p=>p.id===4);for(const key of ['id','name','role','ratings','goals','own','apps','wins','draws','losses'])assert.deepEqual(recovered[key],beforeRemoval[key]);assert.equal(recovered.email,null);assert.equal(recovered.admin,false);assert.equal(recovered.seeAll,false);
+assert.ok(!(await db.query('select public.club_admin_history() x')).rows[0].x.deletedPlayers.some(p=>p.id===4));await rejects(()=>act('player_restore',{id:4}));
+await act('invite',{id:4,email:'p4@test.invalid'});await as(4);await act('vote',{round:profileRound.id,candidate:1});await as(1);history=(await db.query('select public.club_admin_history() x')).rows[0].x;assert.ok(history.changes.every(a=>a.action!=='vote'&&!('candidate' in a.details)));
+await db.exec('reset role;set role anon');await rejects(()=>db.query('select public.club_admin_history()'));
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
