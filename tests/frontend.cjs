@@ -17,7 +17,7 @@ function harness(online=false){
   user=11;showMatch(edited.id);if($('#modal').innerHTML.includes('Modifica partita'))throw Error('nonadmin edit button');user=0;
   await action('match_edit',{id:edited.id,date:'2026-10-15',time:'20:30',field:'Oratorio Don Bosco Arena',a:edited.a,b:edited.b});if(edited.time!=='20:30')throw Error('edit time');
   let before=p(0).goals;let m=state.matches[0],result={};for(let pid of [...m.a,...m.b])result[pid]={goals:pid===0?2:0,own:0,present:true};await action('result',{id:m.id,result});await action('result',{id:m.id,result});if(p(0).goals!==before+2)throw Error('double result');
-  showMatch(m.id);if(!$('#modal').innerHTML.includes('Annulla partita'))throw Error('missing cancel');
+  showMatch(m.id);if(!$('#modal').innerHTML.includes('Gol: <b>2</b>')||!$('#modal').innerHTML.includes('Autogol: <b>0</b>'))throw Error('missing player goals');if(!$('#modal').innerHTML.includes('Annulla partita'))throw Error('missing cancel');
   user=11;showMatch(m.id);if($('#modal').innerHTML.includes('Annulla partita'))throw Error('nonadmin cancel button');user=0;
   await action('match_cancel',{id:m.id,reason:'Pioggia'});if(p(0).goals!==before||!m.cancelled)throw Error('cancel statistics');
   showMatch(m.id);if(!$('#modal').innerHTML.includes('Partita annullata')||$('#modal').innerHTML.includes('Registra risultato')||$('#modal').innerHTML.includes('Correggi risultato'))throw Error('cancelled detail');

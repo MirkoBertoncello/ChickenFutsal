@@ -275,7 +275,7 @@ begin
  'score',case when m.result is null then null else jsonb_build_array(
  (select coalesce(sum(case when m.team_a @> jsonb_build_array(r.key::bigint) then (r.value->>'goals')::int else (r.value->>'own')::int end),0) from jsonb_each(m.result) r),
  (select coalesce(sum(case when m.team_b @> jsonb_build_array(r.key::bigint) then (r.value->>'goals')::int else (r.value->>'own')::int end),0) from jsonb_each(m.result) r)) end,
- 'result',case when v_admin then m.result else null end) order by m.match_date,m.match_time),'[]'::jsonb)
+ 'result',case when m.result is null then null when v_admin or v_all then m.result else (select coalesce(jsonb_object_agg(r.key,r.value),'{}'::jsonb) from jsonb_each(m.result) r where r.key=v_actor::text) end) order by m.match_date,m.match_time),'[]'::jsonb)
  into v_matches from club_private.matches m where m.season=p_season;
  select coalesce(jsonb_agg(jsonb_build_object('id',r.id,'award',r.award,'turn',r.turn,'status',r.status,'candidates',r.candidates,
  'voted',exists(select 1 from club_private.ballots b where b.round_id=r.id and b.voter_id=v_actor),

@@ -273,4 +273,10 @@ await db.exec('reset role');assert.equal((await db.query('select count(*) n from
 assert.equal((await db.query('select count(*) n from auth.users where email=$1',['p4@test.invalid'])).rows[0].n,1);
 await as(1);await act('player_edit',{...editProfile,name:'Mario Membro',occasional:false});assert.equal((await db.query('select public.club_snapshot(null) x')).rows[0].x.players.find(p=>p.id===4).email,null);await act('invite',{id:4,email:'p4@test.invalid'});await as(4);
 const restored=(await db.query('select public.club_snapshot(null) x')).rows[0].x;assert.equal(restored.user,4);assert.equal(restored.players.find(p=>p.id===4).name,'Mario Membro');assert.equal(restored.players.find(p=>p.id===4).seeAll,false);assert.equal(restored.rounds.find(r=>r.id===profileRound.id).voted,true);
+// Match summary grants are enforced in the returned JSON, not only in the UI.
+await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261007_match_player_summary.sql',import.meta.url),'utf8'));await as(1);
+const summaryAdmin=await snapshot(2027);const summaryGame=summaryAdmin.matches.find(m=>m.result&&Object.keys(m.result).length===10);assert.ok(summaryGame);
+await as(4);let summaryPrivate=await snapshot(2027);assert.deepEqual(Object.keys(summaryPrivate.matches.find(m=>m.id===summaryGame.id).result),['4']);
+await as(1);await act('permission',{id:4,key:'seeAll',value:true});await as(4);assert.equal(Object.keys((await snapshot(2027)).matches.find(m=>m.id===summaryGame.id).result).length,10);
+await as(1);await act('permission',{id:4,key:'seeAll',value:false});
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
