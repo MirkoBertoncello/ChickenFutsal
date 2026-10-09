@@ -369,6 +369,15 @@ await db.exec(restoreSQL);assert.deepEqual(await pr(7),[99,1.5,99,1.7,61,70.5]);
 assert.deepEqual((await db.query('select result,cancelled_at from club_private.matches where id=$1',[pm3.id])).rows[0],{result:originalResult,cancelled_at:null});
 await db.exec(restoreSQL);assert.deepEqual(await pr(7),[99,1.5,99,1.7,61,70.5]);
 assert.equal((await db.query("select count(*)::int n from club_private.audit where action='match_restore'")).rows[0].n,1);
+// Permanent deletion removes the match and all derived effects without touching other matches.
+const untouchedMatches=(await db.query('select * from club_private.matches where id<>$1 order by id',[pm3.id])).rows;
+await db.exec(await readFile(new URL('../supabase/operations/20261009_delete_test_match.sql',import.meta.url),'utf8'));
+assert.deepEqual(await pr(7),[99,1,98.8,1.2,60.5,70]);
+assert.equal((await db.query('select count(*)::int n from club_private.matches where id=$1',[pm3.id])).rows[0].n,0);
+assert.equal((await db.query('select count(*)::int n from club_private.notifications where match_id=$1',[pm3.id])).rows[0].n,0);
+assert.equal((await db.query('select count(*)::int n from club_private.rating_events where match_id=$1',[pm3.id])).rows[0].n,0);
+assert.deepEqual((await db.query('select * from club_private.matches where id<>$1 order by id',[pm3.id])).rows,untouchedMatches);
+
 await db.exec(await readFile(new URL('../supabase/migrations/20261009_performance_step_choices.sql',import.meta.url),'utf8'));
 await as(1);await rejects(()=>act('performance_settings',{step:0.25}));await rejects(()=>act('performance_settings',{step:2}));for(const step of [0,0.5,1])await act('performance_settings',{step});
 await db.exec('reset role');await db.exec(await readFile(new URL('../supabase/migrations/20261009_purge_deleted_player.sql',import.meta.url),'utf8'));
