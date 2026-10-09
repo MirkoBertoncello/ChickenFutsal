@@ -359,4 +359,14 @@ const replacedA=reminderA.map(id=>id===6?imageGuest.id:id);await act('match_edit
 const performanceHistory=(await db.query('select public.club_admin_history() x')).rows[0].x;assert.ok(performanceHistory.changes.some(c=>c.action==='performance_ratings'&&c.details.before.ratings&&c.details.after.ratings));
 // Cancelling a played match after a guest was deleted must reverse their event before recovery.
 const orphanMatch=await performanceMatch();const orphanA=reminderA.map(id=>id===6?imageGuest.id:id);await act('match_edit',{id:orphanMatch.id,date:'2031-01-01',time:'21:00',field:'Performance',a:orphanA,b:reminderB});const orphanResult=Object.fromEntries([...orphanA,...reminderB].map(id=>[id,{goals:0,own:0,present:true,performance:id===imageGuest.id?'above':null}]));await act('result',{id:orphanMatch.id,result:orphanResult});assert.deepEqual(await pr(imageGuest.id),Array(6).fill(67));await act('player_delete',{id:imageGuest.id});await act('match_cancel',{id:orphanMatch.id});await act('player_restore',{id:imageGuest.id});assert.deepEqual(await pr(imageGuest.id),Array(6).fill(66.5));
+// One-off restoration retains the result, restores its rating effects, and is safe to repeat.
+await db.exec('reset role');
+await db.query("update club_private.seasons set name='2025/2026' where id=$1",[reminderSeason]);
+await db.query("update club_private.matches set match_date='2026-10-09',match_time='21:00',field='Oratorio Don Bosco Arena' where id=$1",[pm3.id]);
+const restoreSQL=await readFile(new URL('../supabase/operations/20261009_reactivate_test_match.sql',import.meta.url),'utf8');
+const originalResult=(await db.query('select result from club_private.matches where id=$1',[pm3.id])).rows[0].result;
+await db.exec(restoreSQL);assert.deepEqual(await pr(7),[99,1.5,99,1.7,61,70.5]);
+assert.deepEqual((await db.query('select result,cancelled_at from club_private.matches where id=$1',[pm3.id])).rows[0],{result:originalResult,cancelled_at:null});
+await db.exec(restoreSQL);assert.deepEqual(await pr(7),[99,1.5,99,1.7,61,70.5]);
+assert.equal((await db.query("select count(*)::int n from club_private.audit where action='match_restore'")).rows[0].n,1);
 await db.close();console.log('PASS database: private tables, membership, permissions, own statistics, duplicate votes, self votes, 4 rounds, independent awards, seasons, result corrections, notifications, service-only push queue');
