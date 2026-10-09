@@ -335,3 +335,7 @@ Ogni variazione o sostituzione del giudizio viene annotata nel registro con gioc
 Per riattivare la sola partita di test del 9 ottobre 2026, ore 21:00, Oratorio Don Bosco Arena, eseguire `supabase/operations/20261009_reactivate_test_match.sql` nel SQL Editor dopo la migrazione delle prestazioni. Il comando verifica che esista una sola partita corrispondente nella stagione attiva 2025/2026; conserva tabellino e formazioni, ripristina gli effetti delle prestazioni e registra l’operazione come SQL Editor. Ripeterlo non duplica variazioni o registro.
 
 Per limitare le scelte anche nel database eseguire `supabase/migrations/20261009_performance_step_choices.sql` dopo la migrazione delle prestazioni. Una precedente impostazione diversa da 0, 0,5 o 1 viene riportata a 0,5 e registrata; le variazioni storiche restano intatte.
+
+### Eliminazione definitiva dei giocatori archiviati
+
+Applicare `supabase/migrations/20261009_purge_deleted_player.sql` dopo le migrazioni del sistema di valutazione. In Gestione → Giocatori eliminati, “Elimina definitivamente” richiede la frase ELIMINA DEFINITIVAMENTE. La RPC è riservata agli admin e rifiuta profili ancora nella rosa. Rimuove il profilo archiviato e gli eventi delle valutazioni, oltre alle eventuali immagini nei vecchi dettagli del registro. Il profilo non è più recuperabile. Partite, premi assegnati e audit restano conservati: questa operazione non cancella ogni menzione storica del giocatore né il suo account Supabase Auth.
