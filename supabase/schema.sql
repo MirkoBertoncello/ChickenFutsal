@@ -267,7 +267,7 @@ alter table club_private.players add column if not exists image_version text gen
 alter table club_private.players add column if not exists default_image integer not null default 1 check(default_image in (1,2));
 create table if not exists club_private.performance_settings (
  singleton boolean primary key default true check(singleton),
- step numeric not null default 0.5 check(step between 0 and 5 and step=round(step,2))
+ step numeric not null default 0.5 constraint performance_settings_allowed_step check(step in (0,0.5,1))
 );
 insert into club_private.performance_settings(singleton) values(true) on conflict do nothing;
 create table if not exists club_private.rating_events (
@@ -451,7 +451,7 @@ begin
   when 'performance_settings' then
    if jsonb_typeof(p_data->'step') is distinct from 'number' then raise exception 'Variazione non valida';end if;
    v_rating:=(p_data->>'step')::numeric;
-   if v_rating<0 or v_rating>5 or v_rating<>round(v_rating,2) then raise exception 'Variazione da 0 a 5, massimo due decimali';end if;
+   if v_rating not in (0,0.5,1) then raise exception 'Seleziona 0, 0,5 oppure 1';end if;
    select jsonb_build_object('step',step) into v_before from club_private.performance_settings where singleton;
    update club_private.performance_settings set step=v_rating where singleton;
    v_after:=jsonb_build_object('step',v_rating);v_subject:='Valutazione prestazioni';
